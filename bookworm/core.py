@@ -1,5 +1,6 @@
 """
 Core components for BookWorm: DocumentProcessor, KnowledgeGraph, and MindmapGenerator
+Updated architecture: Each document gets its own knowledge graph
 """
 import asyncio
 import json
@@ -12,6 +13,11 @@ from dataclasses import dataclass, field
 from datetime import datetime
 import tempfile
 import shutil
+
+# Internal imports
+from .utils import BookWormConfig, get_file_category, is_supported_file
+from .library import LibraryManager, DocumentStatus, DocumentType
+from .mindmap_generator import AdvancedMindmapGenerator
 
 # Set up logger
 logger = logging.getLogger(__name__)
@@ -47,8 +53,6 @@ except ImportError:
     initialize_pipeline_status = None
     lightrag_setup_logger = None
 
-from .utils import BookWormConfig, get_file_category, is_supported_file
-
 
 @dataclass
 class ProcessedDocument:
@@ -78,332 +82,194 @@ class MindmapResult:
 
 
 class DocumentProcessor:
-    """Handles document ingestion and text extraction"""
+    """Process documents and extract knowledge"""
     
-    def __init__(self, config: BookWormConfig):
+    def __init__(self, config: BookWormConfig, library_manager: Optional[LibraryManager] = None):
         self.config = config
-        self.logger = logging.getLogger("bookworm.processor")
-        
-        # Ensure directories exist
-        Path(self.config.document_dir).mkdir(parents=True, exist_ok=True)
-        Path(self.config.processed_dir).mkdir(parents=True, exist_ok=True)
-        
-    async def process_document(self, file_path: Union[str, Path]) -> ProcessedDocument:
+        self.working_dir = Path(config.working_dir)
+        self.logger = logging.getLogger(__name__)
+        self.library_manager = library_manager or LibraryManager(config)
+    
+    async def process_document(self, file_path: Union[str, Path]) -> Optional[ProcessedDocument]:
         """Process a single document and extract text"""
         file_path = Path(file_path)
         
         if not file_path.exists():
-            raise FileNotFoundError(f"File not found: {file_path}")
+            self.logger.error(f"File not found: {file_path}")
+            return None
         
         if not is_supported_file(file_path):
-            raise ValueError(f"Unsupported file type: {file_path.suffix}")
+            self.logger.warning(f"Unsupported file type: {file_path}")
+            return None
         
-        # Check file size
-        file_size = file_path.stat().st_size
-        max_size = self.config.max_file_size_mb * 1024 * 1024
-        if file_size > max_size:
-            raise ValueError(f"File too large: {file_size} bytes (max: {max_size})")
+        self.logger.info(f"Processing document: {file_path.name}")
         
-        # Create document record
+        # Create processed document
         doc = ProcessedDocument(
-            original_path=str(file_path),
-            file_type=get_file_category(file_path) or "unknown",
-            file_size=file_size,
+            original_path=str(file_path.absolute()),
+            file_type=file_path.suffix.lower(),
+            file_size=file_path.stat().st_size,
             status="processing"
         )
         
         try:
             # Extract text based on file type
-            text_content = await self._extract_text(file_path)
-            doc.text_content = text_content
+            doc.text_content = await self._extract_text(file_path)
             
-            # Save processed text
-            processed_filename = f"{doc.id}_{file_path.stem}.txt"
-            processed_path = Path(self.config.processed_dir) / processed_filename
-            
-            with open(processed_path, 'w', encoding='utf-8') as f:
-                f.write(text_content)
-            
-            doc.processed_path = str(processed_path)
-            doc.status = "completed"
-            
-            # Extract metadata
-            doc.metadata = await self._extract_metadata(file_path, text_content)
-            
-            self.logger.info(f"Successfully extracted text from document: {file_path} ({len(text_content)} chars)")
-            return doc
-            
+            if doc.text_content:
+                # Save processed text
+                processed_dir = Path(self.config.processed_dir)
+                processed_dir.mkdir(parents=True, exist_ok=True)
+                processed_file = processed_dir / f"{doc.id}_{file_path.stem}.txt"
+                processed_file.write_text(doc.text_content, encoding='utf-8')
+                doc.processed_path = str(processed_file)
+                doc.status = "completed"
+                
+                self.logger.info(f"✅ Successfully processed: {file_path.name}")
+                return doc
+            else:
+                doc.status = "failed"
+                doc.error_message = "No text content extracted"
+                self.logger.error(f"❌ No text content extracted from: {file_path.name}")
+                return None
+                
         except Exception as e:
             doc.status = "failed"
             doc.error_message = str(e)
-            self.logger.error(f"Failed to process document {file_path}: {e}")
-            raise
+            self.logger.error(f"❌ Error processing {file_path.name}: {e}")
+            return None
     
     async def _extract_text(self, file_path: Path) -> str:
         """Extract text from various file formats"""
-        file_category = get_file_category(file_path)
+        file_ext = file_path.suffix.lower()
         
-        if file_category == "pdf":
+        if file_ext == '.txt':
+            return file_path.read_text(encoding='utf-8', errors='ignore')
+        
+        elif file_ext == '.md':
+            return file_path.read_text(encoding='utf-8', errors='ignore')
+        
+        elif file_ext == '.pdf':
             return await self._extract_pdf_text(file_path)
-        elif file_category == "text":
-            return await self._extract_text_file(file_path)
-        elif file_category == "document":
-            return await self._extract_document_text(file_path)
-        elif file_category in ["code", "data"]:
-            return await self._extract_text_file(file_path)
+        
+        elif file_ext in ['.doc', '.docx']:
+            return await self._extract_word_text(file_path)
+        
         else:
-            raise ValueError(f"Unsupported file category: {file_category}")
+            # Try to read as text
+            try:
+                return file_path.read_text(encoding='utf-8', errors='ignore')
+            except Exception as e:
+                self.logger.warning(f"Could not read {file_path} as text: {e}")
+                return ""
     
     async def _extract_pdf_text(self, file_path: Path) -> str:
-        """Extract text from PDF files using mineru as primary processor (following user's methodology)"""
-        # Try mineru first (user's preferred method from lightrag_ex.py)
-        if self.config.pdf_processor == "mineru":
+        """Extract text from PDF using multiple methods"""
+        text_content = ""
+        
+        # Try PyMuPDF first
+        if fitz:
             try:
-                return await self._extract_pdf_mineru(file_path)
+                doc = fitz.open(str(file_path))
+                for page_num in range(doc.page_count):
+                    page = doc.load_page(page_num)
+                    text_content += page.get_text() + "\n\n"
+                doc.close()
+                
+                if text_content.strip():
+                    self.logger.info(f"Extracted text using PyMuPDF: {len(text_content)} chars")
+                    return text_content
             except Exception as e:
-                logger.warning(f"MinerU extraction failed, falling back to PyMuPDF: {e}")
+                self.logger.warning(f"PyMuPDF extraction failed: {e}")
         
-        # Fallback to other processors
-        if self.config.pdf_processor == "pymupdf" and fitz:
-            return await self._extract_pdf_pymupdf(file_path)
-        elif self.config.pdf_processor == "pdfplumber" and pdfplumber:
-            return await self._extract_pdf_pdfplumber(file_path)
-        else:
-            # Try available processors in order of preference
+        # Fallback to pdfplumber
+        if pdfplumber:
             try:
-                return await self._extract_pdf_mineru(file_path)
-            except Exception:
-                if fitz:
-                    return await self._extract_pdf_pymupdf(file_path)
-                elif pdfplumber:
-                    return await self._extract_pdf_pdfplumber(file_path)
-                else:
-                    raise ImportError("No PDF processing library available. Install mineru, pymupdf, or pdfplumber.")
-
-    async def _extract_pdf_mineru(self, file_path: Path) -> str:
-        """Extract PDF content using MinerU (following lightrag_ex.py methodology)"""
-        try:
-            # Import MinerU functions locally to avoid global import issues
-            from mineru.cli.common import prepare_env, read_fn
-            from mineru.data.data_reader_writer import FileBasedDataWriter
-            from mineru.utils.enum_class import MakeMode
-            from mineru.backend.pipeline.pipeline_analyze import doc_analyze as pipeline_doc_analyze
-            from mineru.backend.pipeline.pipeline_middle_json_mkcontent import union_make as pipeline_union_make
-            from mineru.backend.pipeline.model_json_to_middle_json import result_to_middle_json as pipeline_result_to_middle_json
-            
-            # Set environment variables to force CPU usage (like in user's script)
-            import os
-            import tempfile
-            os.environ["CUDA_VISIBLE_DEVICES"] = ""
-            
-            # Create temporary directory for processing
-            with tempfile.TemporaryDirectory() as temp_dir:
-                # Prepare the output directory and file name
-                pdf_file_name = file_path.stem
-                local_image_dir, local_md_dir = prepare_env(temp_dir, pdf_file_name, "auto")
+                with pdfplumber.open(str(file_path)) as pdf:
+                    for page in pdf.pages:
+                        page_text = page.extract_text()
+                        if page_text:
+                            text_content += page_text + "\n\n"
                 
-                # Read PDF file
-                pdf_bytes = read_fn(str(file_path))
-                if not pdf_bytes:
-                    logger.error(f"Failed to read PDF file: {file_path}")
-                    return ""
-                
-                # Process PDF using MinerU pipeline (matching user's methodology)
-                pdf_bytes_list = [pdf_bytes]
-                p_lang_list = ["en"]  # Default to English, can be made configurable
-                
-                # Analyze document with CPU-only mode
-                logger.info("Processing PDF with MinerU CPU-only mode...")
-                infer_results, all_image_lists, all_pdf_docs, lang_list, ocr_enabled_list = pipeline_doc_analyze(
-                    pdf_bytes_list, p_lang_list, parse_method="auto", formula_enable=True, table_enable=True
-                )
-                
-                if not infer_results:
-                    logger.error(f"Failed to analyze PDF: {file_path}")
-                    return ""
-                
-                # Process the first (and only) document
-                model_list = infer_results[0]
-                images_list = all_image_lists[0]
-                pdf_doc = all_pdf_docs[0]
-                _lang = lang_list[0]
-                _ocr_enable = ocr_enabled_list[0]
-                
-                # Create data writers
-                image_writer = FileBasedDataWriter(local_image_dir)
-                
-                # Convert to middle JSON format
-                middle_json = pipeline_result_to_middle_json(
-                    model_list, images_list, pdf_doc, image_writer, _lang, _ocr_enable, True
-                )
-                
-                pdf_info = middle_json["pdf_info"]
-                
-                # Generate markdown content
-                image_dir = str(os.path.basename(local_image_dir))
-                markdown_content = pipeline_union_make(pdf_info, MakeMode.MM_MD, image_dir)
-                
-                # Ensure we return a string
-                if isinstance(markdown_content, str):
-                    return markdown_content
-                elif isinstance(markdown_content, list):
-                    return "\n".join(str(item) for item in markdown_content)
-                else:
-                    return str(markdown_content) if markdown_content else ""
-                    
-        except ImportError:
-            logger.warning("MinerU not available, falling back to PyMuPDF")
-            raise ImportError("MinerU not available")
-        except Exception as e:
-            logger.error(f"Error with MinerU PDF extraction: {e}")
-            raise
+                if text_content.strip():
+                    self.logger.info(f"Extracted text using pdfplumber: {len(text_content)} chars")
+                    return text_content
+            except Exception as e:
+                self.logger.warning(f"pdfplumber extraction failed: {e}")
+        
+        self.logger.error("All PDF extraction methods failed")
+        return ""
     
-    async def _extract_pdf_pymupdf(self, file_path: Path) -> str:
-        """Extract text using PyMuPDF"""
-        text_content = ""
-        doc = fitz.open(str(file_path))
-        
-        for page_num in range(doc.page_count):
-            page = doc[page_num]
-            text_content += page.get_text() + "\n\n"
-        
-        doc.close()
-        return text_content.strip()
-    
-    async def _extract_pdf_pdfplumber(self, file_path: Path) -> str:
-        """Extract text using pdfplumber"""
-        text_content = ""
-        
-        with pdfplumber.open(str(file_path)) as pdf:
-            for page in pdf.pages:
-                page_text = page.extract_text()
-                if page_text:
-                    text_content += page_text + "\n\n"
-        
-        return text_content.strip()
-    
-    async def _extract_text_file(self, file_path: Path) -> str:
-        """Extract text from plain text files"""
-        encodings = ['utf-8', 'utf-16', 'latin-1', 'cp1252']
-        
-        for encoding in encodings:
-            try:
-                with open(file_path, 'r', encoding=encoding) as f:
-                    return f.read()
-            except UnicodeDecodeError:
-                continue
-        
-        raise ValueError(f"Could not decode file {file_path} with any supported encoding")
-    
-    async def _extract_document_text(self, file_path: Path) -> str:
-        """Extract text from office documents"""
-        extension = file_path.suffix.lower()
-        
-        if extension in ['.docx', '.doc']:
-            return await self._extract_docx_text(file_path)
-        else:
-            # For other document types, we'll need additional libraries
-            # For now, return a placeholder
-            return f"Document type {extension} not yet supported for text extraction"
-    
-    async def _extract_docx_text(self, file_path: Path) -> str:
-        """Extract text from DOCX files"""
+    async def _extract_word_text(self, file_path: Path) -> str:
+        """Extract text from Word documents"""
         if not DocxDocument:
-            raise ImportError("python-docx not available. Install python-docx to process DOCX files.")
+            self.logger.error("python-docx not available for Word document processing")
+            return ""
         
-        doc = DocxDocument(str(file_path))
-        text_content = ""
-        
-        for paragraph in doc.paragraphs:
-            text_content += paragraph.text + "\n"
-        
-        return text_content.strip()
-    
-    async def _extract_metadata(self, file_path: Path, text_content: str) -> Dict[str, Any]:
-        """Extract metadata from file and content"""
-        stat = file_path.stat()
-        
-        metadata = {
-            "filename": file_path.name,
-            "extension": file_path.suffix,
-            "file_size": stat.st_size,
-            "created_at": datetime.fromtimestamp(stat.st_ctime),
-            "modified_at": datetime.fromtimestamp(stat.st_mtime),
-            "word_count": len(text_content.split()),
-            "char_count": len(text_content),
-            "line_count": len(text_content.splitlines()),
-        }
-        
-        return metadata
+        try:
+            doc = DocxDocument(str(file_path))
+            text_content = ""
+            for paragraph in doc.paragraphs:
+                text_content += paragraph.text + "\n"
+            
+            self.logger.info(f"Extracted text from Word document: {len(text_content)} chars")
+            return text_content
+            
+        except Exception as e:
+            self.logger.error(f"Word document extraction failed: {e}")
+            return ""
     
     async def process_directory(self, directory_path: Union[str, Path]) -> List[ProcessedDocument]:
         """Process all supported documents in a directory"""
         directory_path = Path(directory_path)
-        
-        if not directory_path.exists():
-            raise FileNotFoundError(f"Directory not found: {directory_path}")
-        
         documents = []
         
-        # Find all supported files
-        supported_files = []
+        if not directory_path.exists():
+            self.logger.error(f"Directory not found: {directory_path}")
+            return documents
+        
+        self.logger.info(f"Processing documents in: {directory_path}")
+        
         for file_path in directory_path.rglob("*"):
             if file_path.is_file() and is_supported_file(file_path):
-                supported_files.append(file_path)
+                processed_doc = await self.process_document(file_path)
+                if processed_doc:
+                    documents.append(processed_doc)
         
-        self.logger.info(f"Found {len(supported_files)} supported files in {directory_path}")
-        
-        # Process files with concurrency control
-        semaphore = asyncio.Semaphore(self.config.max_concurrent_processes)
-        
-        async def process_single_file(file_path):
-            async with semaphore:
-                try:
-                    return await self.process_document(file_path)
-                except Exception as e:
-                    self.logger.error(f"Failed to process {file_path}: {e}")
-                    return None
-        
-        # Process all files
-        tasks = [process_single_file(file_path) for file_path in supported_files]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        
-        # Filter out failed results
-        for result in results:
-            if isinstance(result, ProcessedDocument):
-                documents.append(result)
-        
-        self.logger.info(f"Successfully processed {len(documents)} documents")
+        self.logger.info(f"Processed {len(documents)} documents from {directory_path}")
         return documents
 
 
-class KnowledgeGraph:
-    """Handles LightRAG knowledge graph operations following user's methodology"""
+class DocumentKnowledgeGraph:
+    """Handles individual document knowledge graphs - one graph per document"""
     
-    def __init__(self, config: BookWormConfig):
+    def __init__(self, config: BookWormConfig, document_id: str, library_manager: Optional[LibraryManager] = None):
         self.config = config
-        self.logger = logging.getLogger("bookworm.knowledge_graph")
+        self.document_id = document_id
+        self.logger = logging.getLogger(f"bookworm.doc_kg.{document_id[:8]}")
         self.rag: Optional[LightRAG] = None
+        self.library_manager = library_manager or LibraryManager(config)
         self.is_initialized = False
+        
+        # Create document-specific working directory in knowledge_graphs folder
+        self.doc_working_dir = Path("./bookworm_workspace/knowledge_graphs") / document_id
+        self.doc_working_dir.mkdir(parents=True, exist_ok=True)
         
         if not LightRAG:
             raise ImportError("LightRAG not available. Install lightrag-hku.")
     
     async def initialize(self) -> None:
-        """Initialize LightRAG system following user's lightrag_manager.py methodology"""
+        """Initialize document-specific LightRAG system"""
         if self.is_initialized:
-            self.logger.info("LightRAG Knowledge Graph already initialized")
+            self.logger.info(f"Document KG {self.document_id[:8]} already initialized")
             return
             
-        self.logger.info("Initializing LightRAG Knowledge Graph...")
-        
-        # Ensure working directory exists
-        Path(self.config.working_dir).mkdir(parents=True, exist_ok=True)
+        self.logger.info(f"Initializing document knowledge graph for {self.document_id[:8]}...")
         
         # Try to import Ollama functions (following user's pattern), fallback to OpenAI
         ollama_available = False
         try:
-            from lightrag.llm.ollama import ollama_model_complete, ollama_embed
+            from lightrag.llm.ollama import ollama_model_complete
             from lightrag.utils import EmbeddingFunc
             ollama_available = True
             self.logger.info("Using Ollama LLM functions")
@@ -416,17 +282,17 @@ class KnowledgeGraph:
                 self.logger.error("Neither Ollama nor OpenAI LLM functions available")
                 raise ImportError("No LLM functions available")
             
-        # Debug configuration (like in user's lightrag_manager.py)
+        # Debug configuration
         self.logger.info("Configuration:")
-        self.logger.info(f"  Working Directory: {self.config.working_dir}")
+        self.logger.info(f"  Working Directory: {self.doc_working_dir}")
         self.logger.info(f"  LLM Model: {self.config.llm_model}")
         self.logger.info(f"  Embedding Model: {self.config.embedding_model}")
         
-        # Initialize LightRAG with appropriate LLM backend
+        # Initialize LightRAG with document-specific working directory
         if ollama_available:
             # Use Ollama (following user's pattern)
             self.rag = LightRAG(
-                working_dir=self.config.working_dir,
+                working_dir=str(self.doc_working_dir),
                 llm_model_func=ollama_model_complete,
                 llm_model_name=self.config.llm_model,
                 llm_model_kwargs={
@@ -450,7 +316,7 @@ class KnowledgeGraph:
             # Fallback to OpenAI
             self.logger.info("Using OpenAI as LLM provider")
             self.rag = LightRAG(
-                working_dir=self.config.working_dir,
+                working_dir=str(self.doc_working_dir),
                 embedding_func=openai_embed,
                 llm_model_func=gpt_4o_mini_complete,
             )
@@ -461,10 +327,10 @@ class KnowledgeGraph:
             await initialize_pipeline_status()
         
         self.is_initialized = True
-        self.logger.info("LightRAG Knowledge Graph initialized successfully")
+        self.logger.info(f"Document knowledge graph {self.document_id[:8]} initialized successfully")
     
     async def _robust_ollama_embed(self, texts, embed_model, host, max_retries=3, delay=1):
-        """Robust wrapper for ollama_embed with retry logic (following user's pattern)"""
+        """Robust wrapper for ollama_embed with retry logic"""
         from lightrag.llm.ollama import ollama_embed
         
         for attempt in range(max_retries):
@@ -487,26 +353,26 @@ class KnowledgeGraph:
                 await asyncio.sleep(delay)
                 delay *= 2  # Exponential backoff
     
-    async def add_document(self, document: ProcessedDocument) -> None:
-        """Add a processed document to the knowledge graph"""
+    async def add_document_content(self, content: str) -> None:
+        """Add document content to this specific knowledge graph"""
         if not self.rag:
             raise RuntimeError("Knowledge graph not initialized. Call initialize() first.")
         
-        if not document.text_content:
-            raise ValueError("Document has no text content")
+        if not content:
+            raise ValueError("Document has no content")
         
         try:
-            # Insert document content into LightRAG
-            self.logger.info(f"Adding document {document.id} to knowledge graph (this may take a while)...")
-            await self.rag.ainsert(document.text_content)
-            self.logger.info(f"✅ Successfully added document {document.id} to knowledge graph")
+            # Insert document content into this document's LightRAG
+            self.logger.info(f"Adding content to document KG {self.document_id[:8]} (this may take a while)...")
+            await self.rag.ainsert(content)
+            self.logger.info(f"✅ Successfully added content to document KG {self.document_id[:8]}")
             
         except Exception as e:
-            self.logger.error(f"❌ Failed to add document {document.id} to knowledge graph: {e}")
+            self.logger.error(f"❌ Failed to add content to document KG {self.document_id[:8]}: {e}")
             raise
     
     async def query(self, query: str, mode: str = "hybrid", stream: bool = False, **kwargs) -> str:
-        """Query the knowledge graph following user's lightrag_manager.py methodology"""
+        """Query this document's knowledge graph"""
         if not self.is_initialized:
             await self.initialize()
         
@@ -515,186 +381,270 @@ class KnowledgeGraph:
         if mode not in valid_modes:
             self.logger.warning(f"Invalid mode '{mode}'. Using 'hybrid' instead.")
             mode = "hybrid"
-        
-        try:
-            self.logger.info(f"Querying with mode: {mode}")
-            self.logger.debug(f"Question: {query}")
             
-            if self.rag:
-                resp = await self.rag.aquery(
+        try:
+            self.logger.info(f"Querying document KG {self.document_id[:8]} in {mode} mode: {query}")
+            
+            if stream:
+                # Handle streaming response
+                result_stream = await self.rag.aquery(
                     query,
                     param=QueryParam(mode=mode, stream=stream, **kwargs),
                 )
-                return resp
+                result = ""
+                async for chunk in result_stream:
+                    result += chunk
+                return result
             else:
-                self.logger.error("RAG system not initialized")
-                return ""
-            
-        except Exception as e:
-            self.logger.error(f"Error during query: {e}")
-            return ""
-    
-    async def batch_add_documents(self, documents: List[ProcessedDocument]) -> None:
-        """Add multiple documents to the knowledge graph"""
-        if not documents:
-            return
-        
-        self.logger.info(f"Adding {len(documents)} documents to knowledge graph")
-        
-        for i, document in enumerate(documents, 1):
-            try:
-                await self.add_document(document)
-                self.logger.info(f"Progress: {i}/{len(documents)} documents added")
+                # Handle non-streaming response
+                result = await self.rag.aquery(
+                    query,
+                    param=QueryParam(mode=mode, stream=stream, **kwargs),
+                )
+                return result
                 
-            except Exception as e:
-                self.logger.error(f"Failed to add document {document.id}: {e}")
-                continue
-        
-        self.logger.info("Batch document addition completed")
+        except Exception as e:
+            self.logger.error(f"Query failed on document KG {self.document_id[:8]}: {e}")
+            raise
+
+
+class KnowledgeGraph:
+    """Manages multiple document knowledge graphs - one graph per document"""
     
-    async def finalize(self) -> None:
-        """Finalize and cleanup LightRAG resources"""
-        if self.rag:
-            await self.rag.finalize_storages()
-            self.logger.info("LightRAG resources finalized")
+    def __init__(self, config: BookWormConfig, library_manager: Optional[LibraryManager] = None):
+        self.config = config
+        self.logger = logging.getLogger("bookworm.knowledge_graph_manager")
+        self.library_manager = library_manager or LibraryManager(config)
+        self.document_graphs: Dict[str, DocumentKnowledgeGraph] = {}
+        
+        if not LightRAG:
+            raise ImportError("LightRAG not available. Install lightrag-hku.")
+    
+    async def create_document_graph(self, document: ProcessedDocument) -> Tuple[DocumentKnowledgeGraph, Optional[str]]:
+        """Create a new knowledge graph for a specific document"""
+        self.logger.info(f"Creating knowledge graph for document {document.id[:8]}...")
+        
+        # Create document-specific knowledge graph
+        doc_kg = DocumentKnowledgeGraph(self.config, document.id, self.library_manager)
+        await doc_kg.initialize()
+        
+        # Add document content to the graph
+        await doc_kg.add_document_content(document.text_content)
+        
+        # Store reference to the graph
+        self.document_graphs[document.id] = doc_kg
+        
+        # Add to library manager
+        library_doc_id = None
+        try:
+            if Path(document.original_path).exists():
+                # Check if document already exists in library
+                existing_docs = self.library_manager.find_documents(filename=Path(document.original_path).name)
+                if not existing_docs:
+                    library_doc_id = self.library_manager.add_document(filepath=document.original_path)
+                    self.logger.info(f"📚 Document {library_doc_id} added to library index")
+                else:
+                    # Update existing document status
+                    existing_doc = existing_docs[0]
+                    library_doc_id = existing_doc.id
+                    self.logger.info(f"📚 Found existing document {existing_doc.id}")
+                
+                # Always update the status to processed and knowledge graph path for both new and existing documents
+                if library_doc_id:
+                    self.library_manager.update_document_status(
+                        library_doc_id, 
+                        DocumentStatus.PROCESSED,
+                        processed_file_path=document.processed_path
+                    )
+                    self.library_manager.update_document_metadata(
+                        library_doc_id, 
+                        {"knowledge_graph_id": str(doc_kg.doc_working_dir)}
+                    )
+                    self.logger.info(f"📚 Document {library_doc_id} status updated to PROCESSED")
+                    self.logger.info(f"📚 Knowledge graph path saved to library: {doc_kg.doc_working_dir}")
+            else:
+                self.logger.warning(f"Original file {document.original_path} not found, skipping library update")
+        except Exception as e:
+            self.logger.warning(f"Failed to update library for document {document.id}: {e}")
+        
+        return doc_kg, library_doc_id
+    
+    async def get_document_graph(self, document_id: str) -> Optional[DocumentKnowledgeGraph]:
+        """Get the knowledge graph for a specific document"""
+        if document_id in self.document_graphs:
+            return self.document_graphs[document_id]
+        
+        # Try to load from disk if not in memory
+        doc_working_dir = Path("./bookworm_workspace/knowledge_graphs") / document_id
+        if doc_working_dir.exists():
+            self.logger.info(f"Loading existing knowledge graph for document {document_id[:8]}...")
+            doc_kg = DocumentKnowledgeGraph(self.config, document_id, self.library_manager)
+            await doc_kg.initialize()
+            self.document_graphs[document_id] = doc_kg
+            return doc_kg
+        
+        return None
+    
+    async def query_document(self, document_id: str, query: str, mode: str = "hybrid", **kwargs) -> Optional[str]:
+        """Query a specific document's knowledge graph"""
+        doc_kg = await self.get_document_graph(document_id)
+        if doc_kg:
+            return await doc_kg.query(query, mode=mode, **kwargs)
+        return None
+    
+    async def query_all_documents(self, query: str, mode: str = "hybrid", **kwargs) -> Dict[str, str]:
+        """Query all document knowledge graphs and return results"""
+        results = {}
+        
+        # Load all existing graphs
+        graphs_dir = Path("./bookworm_workspace/knowledge_graphs")
+        if graphs_dir.exists():
+            for doc_dir in graphs_dir.iterdir():
+                if doc_dir.is_dir():
+                    document_id = doc_dir.name
+                    try:
+                        doc_kg = await self.get_document_graph(document_id)
+                        if doc_kg:
+                            result = await doc_kg.query(query, mode=mode, **kwargs)
+                            results[document_id] = result
+                    except Exception as e:
+                        self.logger.warning(f"Failed to query document {document_id[:8]}: {e}")
+        
+        return results
+    
+    def list_document_graphs(self) -> List[str]:
+        """List all available document knowledge graphs"""
+        graphs = []
+        graphs_dir = Path("./bookworm_workspace/knowledge_graphs")
+        if graphs_dir.exists():
+            for doc_dir in graphs_dir.iterdir():
+                if doc_dir.is_dir():
+                    graphs.append(doc_dir.name)
+        return graphs
 
 
 class MindmapGenerator:
-    """Generates mindmaps from documents using the integrated mindmap generator"""
+    """Generate mindmaps from knowledge graphs"""
     
-    def __init__(self, config: BookWormConfig):
+    def __init__(self, config: BookWormConfig, library_manager: Optional[LibraryManager] = None):
         self.config = config
-        self.logger = logging.getLogger("bookworm.mindmap")
+        self.working_dir = Path(config.working_dir)
+        self.logger = logging.getLogger(__name__)
+        self.library_manager = library_manager or LibraryManager(config)
         
-        # Ensure output directory exists
-        Path(self.config.output_dir).mkdir(parents=True, exist_ok=True)
+        # Initialize the advanced mindmap generator
+        self.advanced_generator = AdvancedMindmapGenerator(config)
     
-    async def generate_mindmap(self, document: ProcessedDocument) -> MindmapResult:
-        """Generate a mindmap for a processed document"""
+    async def generate_mindmap(self, document: ProcessedDocument, document_library_id: Optional[str] = None) -> MindmapResult:
+        """Generate a mindmap for a processed document using the advanced generator"""
         if not document.text_content:
             raise ValueError("Document has no text content")
         
-        self.logger.info(f"Generating mindmap for document {document.id}")
+        self.logger.info(f"🚀 Generating advanced mindmap for document {document.id}")
         
         try:
-            # Here we would integrate the mindmap generator from the repo
-            # For now, this is a placeholder implementation
+            # Use the advanced mindmap generator
+            advanced_result = await self.advanced_generator.generate_mindmap_from_text(
+                text_content=document.text_content,
+                document_id=document.id
+            )
+            
+            # Convert to our format
             result = MindmapResult(
                 document_id=document.id,
                 provider=self.config.api_provider,
-                mermaid_syntax=self._generate_placeholder_mindmap(document),
-                html_content=self._generate_placeholder_html(document),
-                markdown_outline=self._generate_placeholder_markdown(document)
+                mermaid_syntax=advanced_result.mermaid_syntax,
+                html_content=advanced_result.html_content,
+                markdown_outline=advanced_result.markdown_outline,
+                token_usage={
+                    'input_tokens': advanced_result.token_usage.input_tokens,
+                    'output_tokens': advanced_result.token_usage.output_tokens,
+                    'total_tokens': advanced_result.token_usage.input_tokens + advanced_result.token_usage.output_tokens
+                }
             )
             
             # Save results to files
-            await self._save_mindmap_files(result)
+            await self._save_mindmap_files(result, document, document_library_id)
             
-            self.logger.info(f"Mindmap generated successfully for document {document.id}")
+            self.logger.info(f"✅ Advanced mindmap generated successfully for document {document.id}")
+            self.logger.info(f"📊 Token usage: {result.token_usage['total_tokens']:,} total tokens")
             return result
             
         except Exception as e:
-            self.logger.error(f"Failed to generate mindmap for document {document.id}: {e}")
+            self.logger.error(f"❌ Failed to generate mindmap for document {document.id}: {e}")
             raise
     
-    def _generate_placeholder_mindmap(self, document: ProcessedDocument) -> str:
-        """Generate a placeholder Mermaid mindmap syntax"""
-        # This is a simplified placeholder - in the full implementation,
-        # this would use the actual mindmap generator logic
-        return f"""mindmap
-    ((📄 {document.metadata.get('filename', 'Document')}))
-        ((📊 Overview))
-            (Word Count: {document.metadata.get('word_count', 0)})
-            (File Type: {document.file_type})
-            (Size: {document.file_size} bytes)
-        ((📝 Content Summary))
-            (Generated from: {document.original_path})
-            (Processed at: {document.processed_at})
-"""
-    
-    def _generate_placeholder_html(self, document: ProcessedDocument) -> str:
-        """Generate placeholder HTML for mindmap visualization"""
-        mermaid_syntax = self._generate_placeholder_mindmap(document)
+    async def _save_mindmap_files(self, result: MindmapResult, document: ProcessedDocument, document_library_id: Optional[str] = None) -> None:
+        """Save mindmap files and update library"""
+        doc_name = Path(document.original_path).stem
+        output_dir = Path("./bookworm_workspace/mindmaps") / result.document_id
+        output_dir.mkdir(parents=True, exist_ok=True)
         
-        return f"""<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="utf-8">
-    <title>BookWorm Mindmap - {document.metadata.get('filename', 'Document')}</title>
-    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
-</head>
-<body>
-    <div id="mermaid">
-        <pre class="mermaid">
-{mermaid_syntax}
-        </pre>
-    </div>
-    <script>
-        mermaid.initialize({{
-            startOnLoad: true,
-            theme: 'default',
-            mindmap: {{ useMaxWidth: true }}
-        }});
-    </script>
-</body>
-</html>"""
-    
-    def _generate_placeholder_markdown(self, document: ProcessedDocument) -> str:
-        """Generate placeholder Markdown outline"""
-        return f"""# {document.metadata.get('filename', 'Document')}
-
-## Overview
-- **Word Count**: {document.metadata.get('word_count', 0)}
-- **File Type**: {document.file_type}
-- **Size**: {document.file_size} bytes
-
-## Content Summary
-- **Generated from**: {document.original_path}
-- **Processed at**: {document.processed_at}
-
-## Document Structure
-This is a placeholder outline. In the full implementation, this would contain
-the actual hierarchical structure extracted from the document content.
-"""
-    
-    async def _save_mindmap_files(self, result: MindmapResult) -> None:
-        """Save mindmap files to output directory"""
-        base_path = Path(self.config.output_dir) / f"mindmap_{result.document_id}"
+        mindmap_files = {}
         
         # Save Mermaid syntax
-        mermaid_path = base_path.with_suffix(".mmd")
-        with open(mermaid_path, 'w', encoding='utf-8') as f:
-            f.write(result.mermaid_syntax)
+        if result.mermaid_syntax:
+            mermaid_file = output_dir / f"{doc_name}_mindmap.mmd"
+            mermaid_file.write_text(result.mermaid_syntax)
+            mindmap_files["mermaid"] = str(mermaid_file)
+            self.logger.info(f"💾 Saved Mermaid: {mermaid_file}")
         
-        # Save HTML
-        html_path = base_path.with_suffix(".html")
-        with open(html_path, 'w', encoding='utf-8') as f:
-            f.write(result.html_content)
+        # Save HTML content
+        if result.html_content:
+            html_file = output_dir / f"{doc_name}_mindmap.html"
+            html_file.write_text(result.html_content)
+            mindmap_files["html"] = str(html_file)
+            self.logger.info(f"💾 Saved HTML: {html_file}")
         
-        # Save Markdown
-        markdown_path = base_path.with_suffix(".md")
-        with open(markdown_path, 'w', encoding='utf-8') as f:
-            f.write(result.markdown_outline)
+        # Save Markdown outline
+        if result.markdown_outline:
+            md_file = output_dir / f"{doc_name}_outline.md"
+            md_file.write_text(result.markdown_outline)
+            mindmap_files["markdown"] = str(md_file)
+            self.logger.info(f"💾 Saved Markdown: {md_file}")
         
-        self.logger.info(f"Mindmap files saved: {base_path}")
-    
-    async def batch_generate_mindmaps(self, documents: List[ProcessedDocument]) -> List[MindmapResult]:
-        """Generate mindmaps for multiple documents"""
-        if not documents:
-            return []
-        
-        self.logger.info(f"Generating mindmaps for {len(documents)} documents")
-        results = []
-        
-        for i, document in enumerate(documents, 1):
-            try:
-                result = await self.generate_mindmap(document)
-                results.append(result)
-                self.logger.info(f"Progress: {i}/{len(documents)} mindmaps generated")
-                
-            except Exception as e:
-                self.logger.error(f"Failed to generate mindmap for document {document.id}: {e}")
-                continue
-        
-        self.logger.info("Batch mindmap generation completed")
-        return results
+        # Add mindmap to library
+        try:
+            # Reload library data to ensure we have the latest state
+            self.library_manager._load_library_state()
+            
+            if document_library_id:
+                # Use the provided document library ID directly
+                doc_id = document_library_id
+                self.logger.info(f"Using provided document ID: {doc_id}")
+            else:
+                # Find the document in library by filename (fallback)
+                existing_docs = self.library_manager.find_documents(filename=Path(document.original_path).name)
+                if existing_docs:
+                    doc_id = existing_docs[0].id
+                    self.logger.info(f"Found document by filename: {doc_id}")
+                else:
+                    self.logger.error(f"Could not find document in library: {Path(document.original_path).name}")
+                    return
+            
+            mindmap_metadata = {
+                'document_type': 'unknown',
+                'token_usage': result.token_usage.get('total_tokens', 0),
+                'processing_time': 0.0,
+                'generator_version': '1.0',
+                'topic_count': 0,
+                'subtopic_count': 0,
+                'detail_count': 0
+            }
+            mindmap_id = self.library_manager.add_mindmap(
+                document_id=doc_id,
+                mindmap_files=mindmap_files,
+                metadata=mindmap_metadata
+            )
+            self.logger.info(f"📚 Mindmap {mindmap_id} added to library")
+            
+            # Update the document record with the mindmap ID
+            self.library_manager.update_document_metadata(
+                doc_id, 
+                {"mindmap_id": mindmap_id}
+            )
+            self.logger.info(f"📚 Document {doc_id} updated with mindmap ID: {mindmap_id}")
+        except Exception as e:
+            self.logger.error(f"Failed to add mindmap to library: {e}")
+            import traceback
+            self.logger.error(f"Full traceback: {traceback.format_exc()}")

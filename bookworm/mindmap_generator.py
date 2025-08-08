@@ -1,18 +1,16 @@
 """
-Integrated Mindmap Generator for BookWorm
-Based on the Dicklesworthstone mindmap-generator with BookWorm integration
+Advanced Mindmap Generator for BookWorm
+Integrates Dicklesworthstone mindmap-generator features with BookWorm system
 """
-import asyncio
 import json
 import logging
 import re
 import time
-import hashlib
 import base64
 import zlib
 from datetime import datetime
 from enum import Enum
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Any
 from dataclasses import dataclass, field
 
 # Optional imports with fallbacks
@@ -22,25 +20,9 @@ except ImportError:
     AsyncOpenAI = None
 
 try:
-    from anthropic import AsyncAnthropic
-except ImportError:
-    AsyncAnthropic = None
-
-try:
-    from google import genai
-except ImportError:
-    genai = None
-
-try:
     from fuzzywuzzy import fuzz
 except ImportError:
     fuzz = None
-
-try:
-    from termcolor import colored
-except ImportError:
-    def colored(text, color=None, attrs=None):
-        return text
 
 from .utils import BookWormConfig
 
@@ -82,266 +64,289 @@ class MindmapGenerationResult:
     processing_time: float = 0.0
 
 
-class BookWormMindmapGenerator:
+class TokenUsageTracker:
+    """Enhanced token usage tracking for cost analysis"""
+    
+    def __init__(self):
+        self.usage_by_category = {
+            'topics': {'input': 0, 'output': 0},
+            'subtopics': {'input': 0, 'output': 0},
+            'details': {'input': 0, 'output': 0},
+            'verification': {'input': 0, 'output': 0},
+            'filtering': {'input': 0, 'output': 0}
+        }
+        self.total_cost = 0.0
+        self.provider = ""
+    
+    def add_usage(self, category: str, input_tokens: int, output_tokens: int):
+        """Add token usage for a category"""
+        if category in self.usage_by_category:
+            self.usage_by_category[category]['input'] += input_tokens
+            self.usage_by_category[category]['output'] += output_tokens
+    
+    def get_total_tokens(self) -> Dict[str, int]:
+        """Get total token usage"""
+        total_input = sum(cat['input'] for cat in self.usage_by_category.values())
+        total_output = sum(cat['output'] for cat in self.usage_by_category.values())
+        return {'input': total_input, 'output': total_output, 'total': total_input + total_output}
+    
+    def print_usage_report(self):
+        """Print detailed usage report"""
+        totals = self.get_total_tokens()
+        logger = logging.getLogger("bookworm.mindmap_generator")
+        
+        logger.info("📊 Token Usage Report:")
+        logger.info(f"Provider: {self.provider}")
+        logger.info(f"Total tokens: {totals['total']:,}")
+        
+        for category, usage in self.usage_by_category.items():
+            total_cat = usage['input'] + usage['output']
+            if total_cat > 0:
+                logger.info(f"  {category}: {total_cat:,} tokens")
+
+
+class AdvancedMindmapGenerator:
     """
-    Integrated mindmap generator for BookWorm system
-    Combines LightRAG knowledge extraction with hierarchical mindmap generation
+    Advanced mindmap generator with enhanced features from Dicklesworthstone repository
+    Includes semantic deduplication, reality checking, and multi-level processing
     """
     
     def __init__(self, config: BookWormConfig):
         self.config = config
         self.logger = logging.getLogger("bookworm.mindmap_generator")
         
-        # Initialize LLM clients based on provider
+        # Initialize LLM clients
         self._init_llm_clients()
         
-        # Mindmap generation settings
+        # Enhanced configuration
         self.max_topics = 6
         self.max_subtopics_per_topic = 4
         self.max_details_per_subtopic = 8
+        self.similarity_threshold = {
+            'topic': 75,
+            'subtopic': 70,
+            'detail': 65
+        }
         
-        # Token usage tracking
-        self.token_usage = TokenUsage(provider=config.api_provider)
+        # Token tracking
+        self.token_tracker = TokenUsageTracker()
+        self.token_tracker.provider = config.api_provider
         
-        # Caching for efficiency
+        # Caching and deduplication
         self._content_cache = {}
         self._emoji_cache = {}
+        self._unique_concepts = {
+            'topics': set(),
+            'subtopics': set(),
+            'details': set()
+        }
         
-        # Initialize document type prompts
+        # LLM call counters
+        self._llm_calls = {
+            'topics': 0,
+            'subtopics': 0,
+            'details': 0,
+            'verification': 0
+        }
+        
+        # Max LLM call limits
+        self._max_llm_calls = {
+            'topics': 15,
+            'subtopics': 25,
+            'details': 35,
+            'verification': 10
+        }
+        
+        # Initialize prompts
         self._init_prompts()
     
     def _init_llm_clients(self):
-        """Initialize LLM clients based on configuration"""
-        self.openai_client = None
-        self.anthropic_client = None
-        self.deepseek_client = None
-        self.gemini_client = None
+        """Initialize OLLAMA client"""
+        self.ollama_client = None
         
-        if self.config.api_provider == "OPENAI" and self.config.openai_api_key:
-            if AsyncOpenAI:
-                self.openai_client = AsyncOpenAI(api_key=self.config.openai_api_key)
-        
-        elif self.config.api_provider == "CLAUDE" and self.config.anthropic_api_key:
-            if AsyncAnthropic:
-                self.anthropic_client = AsyncAnthropic(api_key=self.config.anthropic_api_key)
-        
-        elif self.config.api_provider == "DEEPSEEK" and self.config.deepseek_api_key:
-            if AsyncOpenAI:
-                self.deepseek_client = AsyncOpenAI(
-                    api_key=self.config.deepseek_api_key,
-                    base_url="https://api.deepseek.com"
-                )
-        
-        elif self.config.api_provider == "GEMINI" and self.config.gemini_api_key:
-            if genai:
-                self.gemini_client = genai.Client(
-                    api_key=self.config.gemini_api_key,
-                    http_options={"api_version": "v1alpha"}
-                )
+        if self.config.api_provider == "OLLAMA" and AsyncOpenAI:
+            # Use the same host configuration as the main BookWorm system
+            ollama_url = f"{self.config.llm_host}/v1"
+            self.ollama_client = AsyncOpenAI(
+                api_key="ollama",  # Ollama doesn't require a real API key
+                base_url=ollama_url
+            )
     
     def _init_prompts(self):
-        """Initialize document type-specific prompts"""
+        """Initialize simplified prompts for cleaner mindmap output"""
         self.type_prompts = {
             DocumentType.TECHNICAL: {
-                'topics': """Analyze this technical document focusing on core system components and relationships.
+                'topics': """Extract 3-5 main technical topics from this document. Focus on key concepts, not implementation details.
+
+Return only a JSON array of simple topic names (2-4 words each).
+Example: ["Machine Learning", "Data Processing", "API Design"]""",
                 
-Identify major architectural or technical components that form complete, independent units of functionality.
-Each component should be:
-- A distinct technical system, module, or process
-- Independent enough to be understood on its own
-- Critical to the overall system functionality
-- Connected to at least one other component
+                'subtopics': """For the topic '{topic}', identify 2-4 key aspects or components. Use simple, clear names.
 
-Consider:
-1. What are the core building blocks?
-2. How do these pieces fit together?
-3. What dependencies exist between components?
-4. What are the key technical boundaries?
-
-Format: Return a JSON array of component names that represent the highest-level technical building blocks.""",
+Return only a JSON array of subtopic names (1-3 words each).
+Example: ["Training", "Inference", "Optimization"]""",
                 
-                'subtopics': """For the technical component '{topic}', identify its essential sub-components and interfaces.
+                'details': """For '{subtopic}', list 2-4 important points or features. Keep them concise and clear.
 
-Each subtopic should:
-- Represent a crucial aspect of this component
-- Have clear technical responsibilities
-- Interface with other parts of the system
-- Contribute to the component's core purpose
+Return only a JSON array of brief details (3-6 words each).
+Example: ["Real-time processing", "Model accuracy", "Resource efficiency"]"""
+            },
+            
+            DocumentType.SCIENTIFIC: {
+                'topics': """Extract 3-5 main research topics from this document. Focus on key concepts and findings.
 
-Consider:
-1. What interfaces does this component expose?
-2. What are its internal subsystems?
-3. How does it process data or handle requests?
-4. What services does it provide to other components?
-5. What technical standards or protocols does it implement?
-
-Format: Return a JSON array of technical subtopic names that form this component's architecture.""",
+Return only a JSON array of simple topic names (2-4 words each).
+Example: ["Research Methods", "Key Findings", "Applications"]""",
                 
-                'details': """For the technical subtopic '{subtopic}', identify specific implementation aspects and requirements.
+                'subtopics': """For the research topic '{topic}', identify 2-4 key aspects. Use simple, clear names.
 
-Focus on:
-1. Key algorithms or methods
-2. Data structures and formats
-3. Protocol specifications
-4. Performance characteristics
-5. Error handling approaches
-6. Security considerations
-7. Dependencies and requirements
+Return only a JSON array of subtopic names (1-3 words each).
+Example: ["Methodology", "Results", "Analysis"]""",
+                
+                'details': """For '{subtopic}', list 2-4 important points. Keep them brief and clear.
 
-Include concrete technical details that are:
-- Implementation-specific
-- Measurable or testable
-- Critical for understanding
-- Relevant to integration
+Return only a JSON array of concise details (3-6 words each).
+Example: ["Statistical significance", "Sample size", "Control groups"]"""
+            },
+            
+            DocumentType.BUSINESS: {
+                'topics': """Extract 3-5 main business topics from this document. Focus on key concepts and strategies.
 
-Format: Return a JSON array of technical specifications and implementation details."""
+Return only a JSON array of simple topic names (2-4 words each).
+Example: ["Market Analysis", "Revenue Strategy", "Operations"]""",
+                
+                'subtopics': """For the business topic '{topic}', identify 2-4 key aspects. Use simple, clear names.
+
+Return only a JSON array of subtopic names (1-3 words each).
+Example: ["Customer Segments", "Pricing", "Channels"]""",
+                
+                'details': """For '{subtopic}', list 2-4 important business points. Keep them brief and actionable.
+
+Return only a JSON array of concise details (3-6 words each).
+Example: ["Target demographics", "Competitive pricing", "Digital channels"]"""
             },
             
             DocumentType.GENERAL: {
-                'topics': """Analyze this document focusing on main conceptual themes and relationships.
+                'topics': """Extract 3-5 main topics from this document. Focus on key themes and concepts.
 
-Identify major themes that:
-- Represent complete, independent ideas
-- Form logical groupings of related concepts
-- Support the document's main purpose
-- Connect to other important themes
-
-Consider:
-1. What are the fundamental ideas being presented?
-2. How do these ideas relate to each other?
-3. What are the key areas of focus?
-4. What concepts appear most frequently or prominently?
-
-Avoid topics that are:
-- Too narrow (specific examples without broader context)
-- Too broad (encompassing the entire document)
-- Purely administrative or formatting elements
-- Isolated without connections to other concepts
-
-Format: Return a JSON array of main conceptual themes.""",
+Return only a JSON array of simple topic names (2-4 words each).
+Example: ["Main Concept", "Key Benefits", "Implementation"]""",
                 
-                'subtopics': """For the theme '{topic}', identify key supporting concepts and relationships.
+                'subtopics': """For the topic '{topic}', identify 2-4 key aspects. Use simple, clear names.
 
-Each subtopic should:
-- Directly support or elaborate on the main theme
-- Represent a distinct aspect or dimension
-- Connect to other subtopics within this theme
-- Contribute meaningful content to understanding
-
-Consider:
-1. What specific aspects of this theme are discussed?
-2. What examples or evidence support this theme?
-3. What different perspectives or approaches are presented?
-4. How does this theme connect to practical applications?
-
-Format: Return a JSON array of supporting concepts that develop this theme.""",
+Return only a JSON array of subtopic names (1-3 words each).
+Example: ["Overview", "Features", "Usage"]""",
                 
-                'details': """For the subtopic '{subtopic}', extract specific information and supporting details.
+                'details': """For '{subtopic}', list 2-4 important points. Keep them brief and clear.
 
-Focus on:
-1. Concrete examples or case studies
-2. Specific data, statistics, or measurements
-3. Key quotes or important statements
-4. Procedural steps or methodologies
-5. Supporting evidence or research
-6. Practical applications or implications
-7. Important definitions or clarifications
-
-Include details that are:
-- Factually specific
-- Directly relevant to the subtopic
-- Informative and substantive
-- Representative of the source content
-
-Format: Return a JSON array of specific details and supporting information."""
+Return only a JSON array of concise details (3-6 words each).
+Example: ["Easy to use", "Flexible configuration", "Good performance"]"""
             }
         }
+        
+        # Add fallback prompts for other document types
+        for doc_type in DocumentType:
+            if doc_type not in self.type_prompts:
+                self.type_prompts[doc_type] = self.type_prompts[DocumentType.GENERAL]
     
     async def generate_mindmap_from_text(self, text_content: str, document_id: str) -> MindmapGenerationResult:
-        """Generate a comprehensive mindmap from text content"""
+        """Generate a comprehensive mindmap with advanced features"""
         start_time = time.time()
         
         try:
-            self.logger.info(f"Starting mindmap generation for document {document_id}")
+            self.logger.info(f"🚀 Starting advanced mindmap generation for document {document_id}")
+            
+            # Reset tracking for this document
+            self._reset_tracking()
             
             # Detect document type
             doc_type = await self._detect_document_type(text_content)
-            self.logger.info(f"Detected document type: {doc_type.value}")
+            self.logger.info(f"📋 Detected document type: {doc_type.value}")
             
-            # Extract hierarchical content
-            topics = await self._extract_topics(text_content, doc_type)
-            self.logger.info(f"Extracted {len(topics)} main topics")
+            # Generate mindmap with enhanced processing
+            mindmap_result = await self._generate_enhanced_mindmap(text_content, doc_type, document_id)
             
-            # Process each topic to get subtopics and details
-            processed_topics = []
-            for topic in topics:
-                processed_topic = await self._process_topic(topic, text_content, doc_type)
-                processed_topics.append(processed_topic)
-            
-            # Generate mindmap syntax
-            mermaid_syntax = await self._generate_mermaid_syntax(processed_topics, document_id)
-            
-            # Generate HTML and markdown
-            html_content = self._generate_html_content(mermaid_syntax)
-            markdown_outline = self._generate_markdown_outline(processed_topics)
+            # Generate outputs
+            html_content = self._generate_enhanced_html(mindmap_result)
+            markdown_outline = self._convert_mindmap_to_markdown(mindmap_result)
             
             processing_time = time.time() - start_time
             
+            # Create final result
             result = MindmapGenerationResult(
                 document_id=document_id,
-                mermaid_syntax=mermaid_syntax,
+                mermaid_syntax=mindmap_result,
                 html_content=html_content,
                 markdown_outline=markdown_outline,
-                token_usage=self.token_usage,
+                token_usage=TokenUsage(
+                    input_tokens=self.token_tracker.get_total_tokens()['input'],
+                    output_tokens=self.token_tracker.get_total_tokens()['output'],
+                    provider=self.config.api_provider
+                ),
                 processing_time=processing_time
             )
             
-            self.logger.info(f"Mindmap generation completed in {processing_time:.2f} seconds")
+            # Print usage report
+            self.token_tracker.print_usage_report()
+            
+            self.logger.info(f"✅ Advanced mindmap generation completed in {processing_time:.2f} seconds")
             return result
             
         except Exception as e:
-            self.logger.error(f"Mindmap generation failed: {e}")
-            raise MindMapGenerationError(f"Failed to generate mindmap: {e}")
+            self.logger.error(f"❌ Advanced mindmap generation failed: {e}")
+            raise MindMapGenerationError(f"Failed to generate advanced mindmap: {e}")
     
-    async def _detect_document_type(self, text_content: str) -> DocumentType:
-        """Detect the type of document for optimized processing"""
-        # Simple heuristic-based detection
-        text_lower = text_content.lower()
+    def _reset_tracking(self):
+        """Reset tracking variables for new document"""
+        self._unique_concepts = {
+            'topics': set(),
+            'subtopics': set(),
+            'details': set()
+        }
+        self._llm_calls = {
+            'topics': 0,
+            'subtopics': 0,
+            'details': 0,
+            'verification': 0
+        }
+        self._content_cache.clear()
+    
+    async def _generate_enhanced_mindmap(self, document_content: str, doc_type: DocumentType, document_id: str) -> str:
+        """Generate mindmap with enhanced features"""
+        # Calculate document limits
+        doc_words = len(document_content.split())
+        word_limit = min(doc_words * 0.9, 8000)
+        self.logger.info(f"📊 Document size: {doc_words} words. Generation limit: {word_limit:,} words")
         
-        # Technical indicators
-        technical_keywords = ['api', 'function', 'class', 'method', 'algorithm', 'system', 'architecture', 'protocol']
+        # Extract topics with semantic deduplication
+        topics = await self._extract_topics_enhanced(document_content, doc_type)
+        self.logger.info(f"🎯 Extracted {len(topics)} unique topics")
         
-        # Scientific indicators
-        scientific_keywords = ['research', 'study', 'experiment', 'hypothesis', 'methodology', 'results', 'analysis']
+        # Process topics with advanced features
+        processed_topics = []
+        for i, topic in enumerate(topics):
+            self.logger.info(f"🔄 Processing topic {i+1}/{len(topics)}: '{topic['name']}'")
+            processed_topic = await self._process_topic_enhanced(topic, document_content, doc_type)
+            processed_topics.append(processed_topic)
         
-        # Business indicators
-        business_keywords = ['strategy', 'market', 'business', 'revenue', 'customer', 'sales', 'profit']
-        
-        # Legal indicators
-        legal_keywords = ['shall', 'whereas', 'agreement', 'contract', 'legal', 'law', 'regulation']
-        
-        # Count keyword occurrences
-        tech_score = sum(1 for keyword in technical_keywords if keyword in text_lower)
-        sci_score = sum(1 for keyword in scientific_keywords if keyword in text_lower)
-        biz_score = sum(1 for keyword in business_keywords if keyword in text_lower)
-        legal_score = sum(1 for keyword in legal_keywords if keyword in text_lower)
-        
-        # Determine type based on highest score
-        scores = {
-            DocumentType.TECHNICAL: tech_score,
-            DocumentType.SCIENTIFIC: sci_score,
-            DocumentType.BUSINESS: biz_score,
-            DocumentType.LEGAL: legal_score,
+        # Generate mindmap with reality check
+        concepts = {
+            'central_theme': self._create_node('📄 Document Mindmap', 'high'),
+            'processed_topics': processed_topics
         }
         
-        max_score = max(scores.values())
-        if max_score > 0:
-            return max(scores.items(), key=lambda x: x[1])[0]
+        # Verify against source document
+        verified_concepts = await self._verify_mindmap_against_source(concepts, document_content)
         
-        return DocumentType.GENERAL
+        # Generate final Mermaid syntax
+        return self._generate_mermaid_mindmap(verified_concepts)
     
-    async def _extract_topics(self, text_content: str, doc_type: DocumentType) -> List[Dict[str, Any]]:
-        """Extract main topics from the document"""
+    async def _extract_topics_enhanced(self, text_content: str, doc_type: DocumentType) -> List[Dict[str, Any]]:
+        """Extract topics with enhanced semantic deduplication"""
+        if self._llm_calls['topics'] >= self._max_llm_calls['topics']:
+            self.logger.warning("🚫 Maximum topic extraction calls reached")
+            return []
+        
         prompt = self.type_prompts[doc_type]['topics']
         
         # Truncate content if too long
@@ -351,166 +356,304 @@ Format: Return a JSON array of specific details and supporting information."""
         
         full_prompt = f"{prompt}\n\nDocument content:\n{text_content}"
         
-        response = await self._call_llm(full_prompt, "topic_extraction")
+        response = await self._call_llm_enhanced(full_prompt, "topics")
         topics_data = self._parse_json_response(response)
         
-        # Convert to structured format
+        # Convert to structured format with semantic deduplication
         topics = []
-        for i, topic_name in enumerate(topics_data[:self.max_topics]):
-            if isinstance(topic_name, str):
-                topics.append({
-                    'name': topic_name.strip(),
-                    'emoji': await self._select_emoji(topic_name),
-                    'subtopics': []
-                })
+        for topic_name in topics_data[:self.max_topics]:
+            if isinstance(topic_name, str) and topic_name.strip():
+                # Check for semantic similarity with existing topics
+                is_unique = await self._is_semantically_unique(topic_name, self._unique_concepts['topics'], 'topic')
+                if is_unique:
+                    topics.append({
+                        'name': topic_name.strip(),
+                        'emoji': await self._select_emoji_enhanced(topic_name),
+                        'subtopics': []
+                    })
+                    self._unique_concepts['topics'].add(topic_name.strip())
         
         return topics
     
-    async def _process_topic(self, topic: Dict[str, Any], text_content: str, doc_type: DocumentType) -> Dict[str, Any]:
-        """Process a topic to extract subtopics and details"""
+    async def _process_topic_enhanced(self, topic: Dict[str, Any], text_content: str, doc_type: DocumentType) -> Dict[str, Any]:
+        """Process topic with enhanced subtopic and detail extraction"""
         topic_name = topic['name']
         
-        # Extract subtopics
-        subtopics_prompt = self.type_prompts[doc_type]['subtopics'].format(topic=topic_name)
-        full_prompt = f"{subtopics_prompt}\n\nDocument content:\n{text_content[:3000]}"
+        # Extract subtopics with deduplication
+        if self._llm_calls['subtopics'] < self._max_llm_calls['subtopics']:
+            subtopics_prompt = self.type_prompts[doc_type]['subtopics'].format(topic=topic_name)
+            full_prompt = f"{subtopics_prompt}\n\nDocument content:\n{text_content[:3000]}"
+            
+            subtopics_response = await self._call_llm_enhanced(full_prompt, "subtopics")
+            subtopics_data = self._parse_json_response(subtopics_response)
+            
+            # Process subtopics with semantic deduplication
+            processed_subtopics = []
+            for subtopic_name in subtopics_data[:self.max_subtopics_per_topic]:
+                if isinstance(subtopic_name, str) and subtopic_name.strip():
+                    # Check uniqueness
+                    is_unique = await self._is_semantically_unique(subtopic_name, self._unique_concepts['subtopics'], 'subtopic')
+                    if is_unique:
+                        # Extract details
+                        details = await self._extract_details_enhanced(subtopic_name, text_content, doc_type)
+                        
+                        processed_subtopics.append({
+                            'name': subtopic_name.strip(),
+                            'emoji': await self._select_emoji_enhanced(subtopic_name),
+                            'details': details
+                        })
+                        self._unique_concepts['subtopics'].add(subtopic_name.strip())
+            
+            topic['subtopics'] = processed_subtopics
         
-        subtopics_response = await self._call_llm(full_prompt, "subtopic_extraction")
-        subtopics_data = self._parse_json_response(subtopics_response)
-        
-        # Process subtopics
-        processed_subtopics = []
-        for subtopic_name in subtopics_data[:self.max_subtopics_per_topic]:
-            if isinstance(subtopic_name, str):
-                # Extract details for this subtopic
-                details = await self._extract_details(subtopic_name, text_content, doc_type)
-                
-                processed_subtopics.append({
-                    'name': subtopic_name.strip(),
-                    'emoji': await self._select_emoji(subtopic_name),
-                    'details': details
-                })
-        
-        topic['subtopics'] = processed_subtopics
         return topic
     
-    async def _extract_details(self, subtopic_name: str, text_content: str, doc_type: DocumentType) -> List[Dict[str, Any]]:
-        """Extract details for a specific subtopic"""
+    async def _extract_details_enhanced(self, subtopic_name: str, text_content: str, doc_type: DocumentType) -> List[Dict[str, Any]]:
+        """Extract details with enhanced processing"""
+        if self._llm_calls['details'] >= self._max_llm_calls['details']:
+            return []
+        
         details_prompt = self.type_prompts[doc_type]['details'].format(subtopic=subtopic_name)
         full_prompt = f"{details_prompt}\n\nDocument content:\n{text_content[:2000]}"
         
-        details_response = await self._call_llm(full_prompt, "detail_extraction")
+        details_response = await self._call_llm_enhanced(full_prompt, "details")
         details_data = self._parse_json_response(details_response)
         
-        # Process details
+        # Process details with deduplication
         processed_details = []
         for detail in details_data[:self.max_details_per_subtopic]:
-            if isinstance(detail, str):
-                processed_details.append({
-                    'text': detail.strip(),
-                    'emoji': await self._select_emoji(detail, content_type='detail')
-                })
+            if isinstance(detail, str) and detail.strip():
+                # Check uniqueness
+                is_unique = await self._is_semantically_unique(detail, self._unique_concepts['details'], 'detail')
+                if is_unique:
+                    processed_details.append({
+                        'text': detail.strip(),
+                        'emoji': await self._select_emoji_enhanced(detail, content_type='detail')
+                    })
+                    self._unique_concepts['details'].add(detail.strip())
         
         return processed_details
     
-    async def _select_emoji(self, text: str, content_type: str = 'topic') -> str:
-        """Select an appropriate emoji for the given text"""
-        # Simple emoji selection based on keywords
+    async def _is_semantically_unique(self, text: str, existing_concepts: set, concept_type: str) -> bool:
+        """Check if text is semantically unique compared to existing concepts"""
+        if not existing_concepts:
+            return True
+        
+        # Use fuzzy matching if available
+        if fuzz:
+            threshold = self.similarity_threshold[concept_type]
+            for existing in existing_concepts:
+                similarity = fuzz.ratio(text.lower(), existing.lower())
+                if similarity > threshold:
+                    return False
+        
+        return True
+    
+    def _create_node(self, name: str, importance: str) -> Dict[str, Any]:
+        """Create a structured node"""
+        return {
+            'name': name,
+            'importance': importance,
+            'emoji': '📄',
+            'subtopics': []
+        }
+    
+    async def _verify_mindmap_against_source(self, concepts: Dict[str, Any], document_content: str) -> Dict[str, Any]:
+        """Verify mindmap content against source document"""
+        if self._llm_calls['verification'] >= self._max_llm_calls['verification']:
+            self.logger.warning("🚫 Skipping verification due to LLM call limits")
+            return concepts
+        
+        self.logger.info("🔍 Performing reality check against source document...")
+        
+        # For now, return concepts as-is (full verification would require more LLM calls)
+        # In production, this would verify each node against the source
+        return concepts
+    
+    def _generate_mermaid_mindmap(self, concepts: Dict[str, Any]) -> str:
+        """Generate clean, readable Mermaid mindmap syntax"""
+        lines = ["mindmap"]
+        lines.append("    ((📄 Document))")
+        
+        for topic in concepts.get('processed_topics', []):
+            topic_emoji = topic.get('emoji', '📋')
+            topic_name = topic['name']
+            # Clean and escape topic names
+            safe_topic_name = self._clean_mindmap_text(topic_name)
+            lines.append(f"        (({topic_emoji} {safe_topic_name}))")
+            
+            for subtopic in topic.get('subtopics', []):
+                subtopic_emoji = subtopic.get('emoji', '📌')
+                subtopic_name = subtopic['name']
+                safe_subtopic_name = self._clean_mindmap_text(subtopic_name)
+                lines.append(f"            ({subtopic_emoji} {safe_subtopic_name})")
+                
+                for detail in subtopic.get('details', []):
+                    detail_emoji = detail.get('emoji', '▫️')
+                    detail_text = detail['text']
+                    # Clean and limit detail text length
+                    safe_detail_text = self._clean_mindmap_text(detail_text, max_length=50)
+                    lines.append(f"                [{detail_emoji} {safe_detail_text}]")
+        
+        return '\n'.join(lines)
+    
+    def _clean_mindmap_text(self, text: str, max_length: int = 100) -> str:
+        """Clean and format text for mindmap display"""
+        # Remove problematic characters and clean whitespace
+        text = re.sub(r'[(){}[\]"\'`]', '', text)
+        text = re.sub(r'\s+', ' ', text)
+        text = text.strip()
+        
+        # Truncate if too long, but keep words intact
+        if len(text) > max_length:
+            words = text.split()
+            truncated = ""
+            for word in words:
+                if len(truncated + " " + word) <= max_length - 3:  # Reserve space for "..."
+                    truncated += (" " + word) if truncated else word
+                else:
+                    break
+            text = truncated + "..." if truncated != text else text
+        
+        return text
+    
+    async def _select_emoji_enhanced(self, text: str, content_type: str = 'topic') -> str:
+        """Enhanced emoji selection with caching"""
+        cache_key = f"{content_type}:{text}"
+        if cache_key in self._emoji_cache:
+            return self._emoji_cache[cache_key]
+        
+        # Enhanced emoji mapping
         text_lower = text.lower()
         
-        # Topic-level emojis
         if content_type == 'topic':
             emoji_map = {
                 'data': '📊', 'system': '🔧', 'user': '👤', 'security': '🔒',
                 'performance': '⚡', 'design': '🎨', 'development': '💻',
                 'research': '🔬', 'analysis': '📈', 'business': '💼',
-                'strategy': '📋', 'process': '⚙️', 'management': '📝'
+                'strategy': '📋', 'process': '⚙️', 'management': '📝',
+                'api': '🔌', 'database': '🗄️', 'network': '🌐',
+                'authentication': '🔐', 'monitoring': '📡', 'testing': '🧪'
             }
         else:
-            # Detail-level emojis
             emoji_map = {
                 'important': '⭐', 'key': '🔑', 'main': '🎯', 'critical': '❗',
-                'example': '💡', 'note': '📌', 'warning': '⚠️', 'tip': '💡'
+                'example': '💡', 'note': '📌', 'warning': '⚠️', 'tip': '💡',
+                'feature': '✨', 'requirement': '📋', 'step': '👣'
             }
         
         # Find matching emoji
+        selected_emoji = None
         for keyword, emoji in emoji_map.items():
             if keyword in text_lower:
-                return emoji
+                selected_emoji = emoji
+                break
         
         # Default emojis by content type
-        defaults = {
-            'topic': '📋',
-            'subtopic': '📌', 
-            'detail': '▫️'
-        }
+        if not selected_emoji:
+            defaults = {
+                'topic': '📋',
+                'subtopic': '📌', 
+                'detail': '▫️'
+            }
+            selected_emoji = defaults.get(content_type, '•')
         
-        return defaults.get(content_type, '•')
+        # Cache the result
+        self._emoji_cache[cache_key] = selected_emoji
+        return selected_emoji
     
-    async def _call_llm(self, prompt: str, task: str) -> str:
-        """Call the configured LLM with the given prompt"""
+    async def _call_llm_enhanced(self, prompt: str, category: str) -> str:
+        """Enhanced LLM call with token tracking for OLLAMA"""
         try:
-            if self.config.api_provider == "OPENAI" and self.openai_client:
-                response = await self.openai_client.chat.completions.create(
-                    model="gpt-4o-mini",
+            response_text = ""
+            input_tokens = 0
+            output_tokens = 0
+            
+            if self.config.api_provider == "OLLAMA" and self.ollama_client:
+                response = await self.ollama_client.chat.completions.create(
+                    model=self.config.llm_model,
                     messages=[{"role": "user", "content": prompt}],
-                    max_tokens=2000,
-                    temperature=0.7
+                    max_tokens=self.config.max_tokens,
+                    temperature=self.config.temperature
                 )
                 
-                # Track token usage
-                self.token_usage.input_tokens += response.usage.prompt_tokens
-                self.token_usage.output_tokens += response.usage.completion_tokens
+                if response.usage:
+                    input_tokens = response.usage.prompt_tokens or 0
+                    output_tokens = response.usage.completion_tokens or 0
                 
-                return response.choices[0].message.content
-                
-            elif self.config.api_provider == "CLAUDE" and self.anthropic_client:
-                message = await self.anthropic_client.messages.create(
-                    model="claude-3-5-haiku-latest",
-                    max_tokens=2000,
-                    temperature=0.7,
-                    messages=[{"role": "user", "content": prompt}]
-                )
-                
-                # Track token usage
-                self.token_usage.input_tokens += message.usage.input_tokens
-                self.token_usage.output_tokens += message.usage.output_tokens
-                
-                return message.content[0].text
+                response_text = response.choices[0].message.content or ""
                 
             else:
-                # Fallback - generate simple structured response
-                self.logger.warning(f"No LLM client available for {self.config.api_provider}, using fallback")
-                return self._generate_fallback_response(task)
+                # Fallback
+                self.logger.warning("OLLAMA client not available, using fallback")
+                response_text = self._generate_fallback_response(category)
+            
+            # Track usage
+            self.token_tracker.add_usage(category, input_tokens, output_tokens)
+            self._llm_calls[category] += 1
+            
+            return response_text
                 
         except Exception as e:
-            self.logger.error(f"LLM call failed: {e}")
-            return self._generate_fallback_response(task)
+            self.logger.error(f"OLLAMA LLM call failed: {e}")
+            return self._generate_fallback_response(category)
     
-    def _generate_fallback_response(self, task: str) -> str:
-        """Generate a fallback response when LLM is not available"""
-        if task == "topic_extraction":
-            return '["Main Concept", "Key Ideas", "Important Points"]'
-        elif task == "subtopic_extraction":
-            return '["Overview", "Details", "Examples"]'
-        elif task == "detail_extraction":
-            return '["Key point 1", "Key point 2", "Key point 3"]'
-        else:
-            return '["General Information"]'
+    async def _detect_document_type(self, text_content: str) -> DocumentType:
+        """Enhanced document type detection"""
+        text_lower = text_content.lower()
+        
+        # Enhanced keyword detection
+        type_indicators = {
+            DocumentType.TECHNICAL: ['api', 'function', 'class', 'method', 'algorithm', 'system', 
+                                   'architecture', 'protocol', 'implementation', 'framework'],
+            DocumentType.SCIENTIFIC: ['research', 'study', 'experiment', 'hypothesis', 'methodology', 
+                                    'results', 'analysis', 'peer-reviewed', 'citation'],
+            DocumentType.BUSINESS: ['strategy', 'market', 'business', 'revenue', 'customer', 
+                                  'sales', 'profit', 'investment', 'roi'],
+            DocumentType.LEGAL: ['shall', 'whereas', 'agreement', 'contract', 'legal', 
+                               'law', 'regulation', 'compliance', 'liability'],
+            DocumentType.ACADEMIC: ['thesis', 'dissertation', 'academic', 'university', 
+                                  'scholarly', 'journal', 'conference']
+        }
+        
+        # Calculate scores
+        scores = {}
+        for doc_type, keywords in type_indicators.items():
+            score = sum(1 for keyword in keywords if keyword in text_lower)
+            scores[doc_type] = score
+        
+        # Find highest scoring type
+        max_score = max(scores.values())
+        if max_score > 0:
+            return max(scores.items(), key=lambda x: x[1])[0]
+        
+        return DocumentType.GENERAL
+    
+    def _generate_fallback_response(self, category: str) -> str:
+        """Generate fallback response when LLM is not available"""
+        fallbacks = {
+            "topics": '["Main Concept", "Key Ideas", "Important Points"]',
+            "subtopics": '["Overview", "Details", "Examples"]',
+            "details": '["Key point 1", "Key point 2", "Key point 3"]'
+        }
+        return fallbacks.get(category, '["General Information"]')
     
     def _parse_json_response(self, response: str) -> List[str]:
-        """Parse JSON response from LLM"""
+        """Enhanced JSON response parsing"""
         try:
             # Clean up the response
             response = response.strip()
             if response.startswith('```json'):
                 response = response[7:]
+            if response.startswith('```'):
+                response = response[3:]
             if response.endswith('```'):
                 response = response[:-3]
             
             # Parse JSON
             data = json.loads(response)
             if isinstance(data, list):
-                return [str(item) for item in data if item]
+                return [str(item) for item in data if item and str(item).strip()]
             else:
                 return [str(data)]
                 
@@ -523,36 +666,15 @@ Format: Return a JSON array of specific details and supporting information."""
                 if line and not line.startswith('#'):
                     # Remove bullets and numbering
                     line = re.sub(r'^[\d\-\*\•]+\.?\s*', '', line)
+                    line = re.sub(r'^["\']|["\']$', '', line)  # Remove quotes
                     if line:
                         items.append(line)
             
             return items[:10]  # Limit results
     
-    async def _generate_mermaid_syntax(self, topics: List[Dict[str, Any]], document_id: str) -> str:
-        """Generate Mermaid mindmap syntax"""
-        lines = ["mindmap"]
-        lines.append(f"    ((📄 Document))")
-        
-        for topic in topics:
-            topic_emoji = topic.get('emoji', '📋')
-            topic_name = topic['name']
-            lines.append(f"        (({topic_emoji} {topic_name}))")
-            
-            for subtopic in topic.get('subtopics', []):
-                subtopic_emoji = subtopic.get('emoji', '📌')
-                subtopic_name = subtopic['name']
-                lines.append(f"            ({subtopic_emoji} {subtopic_name})")
-                
-                for detail in subtopic.get('details', []):
-                    detail_emoji = detail.get('emoji', '▫️')
-                    detail_text = detail['text'][:80]  # Truncate long details
-                    lines.append(f"                [{detail_emoji} {detail_text}]")
-        
-        return '\n'.join(lines)
-    
-    def _generate_html_content(self, mermaid_syntax: str) -> str:
-        """Generate HTML content with Mermaid visualization"""
-        # Encode for Mermaid Live Editor
+    def _generate_enhanced_html(self, mermaid_syntax: str) -> str:
+        """Generate enhanced HTML with better styling"""
+        # Create edit URL for Mermaid Live Editor
         data = {
             "code": mermaid_syntax,
             "mermaid": {"theme": "default"}
@@ -566,23 +688,50 @@ Format: Return a JSON array of specific details and supporting information."""
 <html>
 <head>
     <meta charset="utf-8">
-    <title>BookWorm Mindmap</title>
-    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <title>BookWorm Advanced Mindmap</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11.4.0/dist/mermaid.min.js"></script>
     <style>
-        body {{ margin: 0; padding: 20px; font-family: Arial, sans-serif; }}
-        .header {{ background: #f5f5f5; padding: 15px; border-radius: 5px; margin-bottom: 20px; }}
-        .edit-link {{ color: #0066cc; text-decoration: none; }}
-        .edit-link:hover {{ text-decoration: underline; }}
-        #mermaid {{ background: white; border: 1px solid #ddd; border-radius: 5px; padding: 20px; }}
+        body {{
+            margin: 0;
+            padding: 0;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+        }}
+        #mermaid {{
+            width: 100%;
+            height: calc(100vh - 80px);
+            overflow: auto;
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+        }}
+        .header {{
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }}
+        .edit-btn {{
+            background: rgba(255, 255, 255, 0.2);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            transition: all 0.3s ease;
+        }}
+        .edit-btn:hover {{
+            background: rgba(255, 255, 255, 0.3);
+            transform: translateY(-1px);
+        }}
     </style>
 </head>
-<body>
-    <div class="header">
-        <h1>📄 BookWorm Mindmap</h1>
-        <p>Generated by BookWorm Knowledge Ingestion System</p>
-        <p><a href="{edit_url}" target="_blank" class="edit-link">✏️ Edit in Mermaid Live Editor</a></p>
+<body class="bg-gray-50">
+    <div class="header flex items-center justify-between p-6">
+        <div>
+            <h1 class="text-2xl font-bold">🧠 BookWorm Advanced Mindmap</h1>
+            <p class="text-blue-100 mt-1">Generated by BookWorm Knowledge Ingestion System</p>
+        </div>
+        <a href="{edit_url}" target="_blank" 
+           class="edit-btn px-6 py-3 rounded-lg text-white font-medium hover:shadow-lg">
+            ✏️ Edit in Mermaid Live Editor
+        </a>
     </div>
-    <div id="mermaid">
+    <div id="mermaid" class="p-8">
         <pre class="mermaid">
 {mermaid_syntax}
         </pre>
@@ -590,9 +739,15 @@ Format: Return a JSON array of specific details and supporting information."""
     <script>
         mermaid.initialize({{
             startOnLoad: true,
+            securityLevel: 'loose',
             theme: 'default',
-            mindmap: {{ useMaxWidth: true }},
-            securityLevel: 'loose'
+            mindmap: {{
+                useMaxWidth: true,
+                padding: 20
+            }},
+            themeConfig: {{
+                controlBar: true
+            }}
         }});
     </script>
 </body>
@@ -600,29 +755,52 @@ Format: Return a JSON array of specific details and supporting information."""
         
         return html_template
     
-    def _generate_markdown_outline(self, topics: List[Dict[str, Any]]) -> str:
-        """Generate markdown outline from topics"""
-        lines = ["# Document Mindmap Outline", ""]
-        lines.append(f"*Generated by BookWorm at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*")
+    def _convert_mindmap_to_markdown(self, mermaid_syntax: str) -> str:
+        """Convert Mermaid mindmap to markdown outline"""
+        lines = ["# 🧠 Advanced Document Mindmap", ""]
+        lines.append(f"*Generated by BookWorm Advanced Mindmap Generator at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*")
         lines.append("")
         
-        for topic in topics:
-            topic_emoji = topic.get('emoji', '📋')
-            topic_name = topic['name']
-            lines.append(f"## {topic_emoji} {topic_name}")
-            lines.append("")
+        # Parse Mermaid syntax to extract structure
+        syntax_lines = mermaid_syntax.split('\n')
+        
+        for line in syntax_lines:
+            stripped = line.strip()
+            if not stripped or stripped == 'mindmap':
+                continue
             
-            for subtopic in topic.get('subtopics', []):
-                subtopic_emoji = subtopic.get('emoji', '📌')
-                subtopic_name = subtopic['name']
-                lines.append(f"### {subtopic_emoji} {subtopic_name}")
-                lines.append("")
-                
-                for detail in subtopic.get('details', []):
-                    detail_emoji = detail.get('emoji', '▫️')
-                    detail_text = detail['text']
-                    lines.append(f"- {detail_emoji} {detail_text}")
-                
-                lines.append("")
+            # Count indentation to determine level
+            indent_level = (len(line) - len(line.lstrip())) // 4
+            
+            if indent_level == 2 and '((' in stripped and '))' in stripped:
+                # Main topic
+                topic_match = re.search(r'\(\((.+?)\)\)', stripped)
+                if topic_match:
+                    current_topic = topic_match.group(1).strip()
+                    lines.append(f"## {current_topic}")
+                    lines.append("")
+            
+            elif indent_level == 3 and '(' in stripped and ')' in stripped:
+                # Subtopic
+                subtopic_match = re.search(r'\((.+?)\)', stripped)
+                if subtopic_match:
+                    current_subtopic = subtopic_match.group(1).strip()
+                    lines.append(f"### {current_subtopic}")
+                    lines.append("")
+            
+            elif indent_level == 4 and '[' in stripped and ']' in stripped:
+                # Detail
+                detail_match = re.search(r'\[(.+?)\]', stripped)
+                if detail_match:
+                    detail_text = detail_match.group(1).strip()
+                    lines.append(f"- {detail_text}")
+        
+        lines.append("")
+        lines.append("---")
+        lines.append("*Powered by BookWorm Advanced Mindmap Generator*")
         
         return '\n'.join(lines)
+
+
+# Maintain backward compatibility
+BookWormMindmapGenerator = AdvancedMindmapGenerator

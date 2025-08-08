@@ -36,11 +36,15 @@ class BookWormConfig:
     timeout: int = 3000  # User's timeout (3000 seconds, not 300)
     embedding_timeout: int = 6000  # User's embedding timeout (6000 seconds, not 600)
     
+    # LLM Generation Settings
+    temperature: float = 0.7
+    max_tokens: int = 2000
+    
     # Directory Settings (following user's lightrag_ex.py structure)
-    working_dir: str = "./lightrag_workspace"  # User's exact working directory
-    document_dir: str = "./lightrag_workspace/docs"
-    processed_dir: str = "./lightrag_workspace/processed_docs"  # Following user's DOCUMENT_ARCHIVE_DIR
-    output_dir: str = "./lightrag_workspace/output"
+    working_dir: str = "./bookworm_workspace"  # BookWorm working directory
+    document_dir: str = "./bookworm_workspace/docs"
+    processed_dir: str = "./bookworm_workspace/processed_docs"  # Following user's DOCUMENT_ARCHIVE_DIR
+    output_dir: str = "./bookworm_workspace/output"
     
     # PDF Processing (following user's preference for mineru)
     pdf_processor: str = "mineru"  # Primary: mineru, fallback: pymupdf, pdfplumber
@@ -83,6 +87,10 @@ def load_config(env_file: Optional[str] = None) -> BookWormConfig:
     config.max_embed_tokens = int(os.getenv("MAX_EMBED_TOKENS", "8192"))
     config.timeout = int(os.getenv("TIMEOUT", "300"))
     config.embedding_timeout = int(os.getenv("EMBEDDING_TIMEOUT", "600"))
+    
+    # Load LLM generation settings
+    config.temperature = float(os.getenv("TEMPERATURE", "0.7"))
+    config.max_tokens = int(os.getenv("MAX_TOKENS", "2000"))
     
     # Load directory settings
     config.working_dir = os.getenv("WORKING_DIR", "./bookworm_workspace")
