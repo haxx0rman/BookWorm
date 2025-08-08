@@ -1,0 +1,169 @@
+2025-08-08 00:21:15,413 - bookworm.knowledge_graph - INFO - initialize:398 - Initializing LightRAG Knowledge Graph...
+2025-08-08 00:21:15,438 - bookworm.knowledge_graph - WARNING - initialize:409 - Ollama LLM functions not available, falling back to OpenAI
+2025-08-08 00:21:15,438 - bookworm.knowledge_graph - INFO - initialize:413 - Configuration:
+2025-08-08 00:21:15,438 - bookworm.knowledge_graph - INFO - initialize:414 -   Working Directory: ./bookworm_workspace
+2025-08-08 00:21:15,438 - bookworm.knowledge_graph - INFO - initialize:415 -   LLM Model: gpt-4o-mini
+2025-08-08 00:21:15,438 - bookworm.knowledge_graph - INFO - initialize:416 -   Embedding Model: text-embedding-3-small
+2025-08-08 00:33:30,743 - bookworm.knowledge_graph - INFO - initialize:398 - Initializing LightRAG Knowledge Graph...
+2025-08-08 00:33:30,766 - bookworm.knowledge_graph - WARNING - initialize:411 - Ollama LLM functions not available, using OpenAI
+2025-08-08 00:33:30,767 - bookworm.knowledge_graph - INFO - initialize:420 - Configuration:
+2025-08-08 00:33:30,767 - bookworm.knowledge_graph - INFO - initialize:421 -   Working Directory: ./bookworm_workspace
+2025-08-08 00:33:30,767 - bookworm.knowledge_graph - INFO - initialize:422 -   LLM Model: gpt-4o-mini
+2025-08-08 00:33:30,767 - bookworm.knowledge_graph - INFO - initialize:423 -   Embedding Model: text-embedding-3-small
+2025-08-08 00:33:30,767 - bookworm.knowledge_graph - INFO - initialize:454 - Using OpenAI as LLM provider
+2025-08-08 00:33:31,446 - bookworm.knowledge_graph - INFO - initialize:467 - LightRAG Knowledge Graph initialized successfully
+2025-08-08 00:33:31,447 - bookworm.processor - INFO - process_document:133 - Successfully processed document: lightrag_ex.py
+2025-08-08 00:33:31,851 - bookworm.knowledge_graph - INFO - add_document:504 - Added document 534bcba5-818a-416a-91f2-ce02b0a4dc10 to knowledge graph
+2025-08-08 00:33:31,852 - bookworm.processor - INFO - process_document:133 - Successfully processed document: lightrag_manager.py
+2025-08-08 00:33:31,958 - bookworm.knowledge_graph - INFO - add_document:504 - Added document 4049e8ad-80f9-4a02-805e-7914bdd7e1f8 to knowledge graph
+2025-08-08 00:33:31,958 - bookworm.knowledge_graph - INFO - query:522 - Querying with mode: hybrid
+2025-08-08 00:33:32,006 - bookworm.knowledge_graph - ERROR - query:536 - Error during query: Error code: 404 - {'error': {'message': 'model "gpt-4o-mini" not found, try pulling it first', 'type': 'api_error', 'param': None, 'code': None}}
+2025-08-08 00:33:32,006 - bookworm.knowledge_graph - INFO - query:522 - Querying with mode: local
+2025-08-08 00:33:32,059 - bookworm.knowledge_graph - ERROR - query:536 - Error during query: Error code: 404 - {'error': {'message': 'model "gpt-4o-mini" not found, try pulling it first', 'type': 'api_error', 'param': None, 'code': None}}
+2025-08-08 00:33:32,059 - bookworm.knowledge_graph - INFO - query:522 - Querying with mode: global
+2025-08-08 00:33:32,109 - bookworm.knowledge_graph - ERROR - query:536 - Error during query: Error code: 404 - {'error': {'message': 'model "gpt-4o-mini" not found, try pulling it first', 'type': 'api_error', 'param': None, 'code': None}}
+2025-08-08 00:33:32,109 - bookworm.knowledge_graph - INFO - query:522 - Querying with mode: hybrid
+2025-08-08 00:33:32,161 - bookworm.knowledge_graph - ERROR - query:536 - Error during query: Error code: 404 - {'error': {'message': 'model "gpt-4o-mini" not found, try pulling it first', 'type': 'api_error', 'param': None, 'code': None}}
+2025-08-08 00:38:10,618 - bookworm.knowledge_graph - INFO - initialize:398 - Initializing LightRAG Knowledge Graph...
+2025-08-08 00:38:10,649 - bookworm.knowledge_graph - WARNING - initialize:411 - Ollama LLM functions not available, using OpenAI
+2025-08-08 00:38:10,649 - bookworm.knowledge_graph - INFO - initialize:420 - Configuration:
+2025-08-08 00:38:10,649 - bookworm.knowledge_graph - INFO - initialize:421 -   Working Directory: ./bookworm_workspace
+2025-08-08 00:38:10,649 - bookworm.knowledge_graph - INFO - initialize:422 -   LLM Model: qwen3-coder:32b
+2025-08-08 00:38:10,649 - bookworm.knowledge_graph - INFO - initialize:423 -   Embedding Model: bge-m3:latest
+2025-08-08 00:38:10,649 - bookworm.knowledge_graph - INFO - initialize:454 - Using OpenAI as LLM provider
+2025-08-08 00:38:10,953 - bookworm.knowledge_graph - INFO - initialize:467 - LightRAG Knowledge Graph initialized successfully
+2025-08-08 00:38:10,954 - bookworm.processor - INFO - process_document:133 - Successfully processed document: lightrag_ex.py
+2025-08-08 00:38:10,955 - bookworm.knowledge_graph - ERROR - add_document:507 - Failed to add document 76af1809-8aec-43fc-9c9c-a3c41475b143 to knowledge graph: cannot access local variable 'first_stage_tasks' where it is not associated with a value
+2025-08-08 00:38:10,955 - bookworm.processor - INFO - process_document:133 - Successfully processed document: lightrag_manager.py
+2025-08-08 00:38:10,956 - bookworm.knowledge_graph - ERROR - add_document:507 - Failed to add document 1ccb820a-5a1d-4796-a1de-ed7af69ad889 to knowledge graph: cannot access local variable 'first_stage_tasks' where it is not associated with a value
+2025-08-08 00:38:10,956 - bookworm.knowledge_graph - INFO - query:522 - Querying with mode: hybrid
+2025-08-08 00:38:11,175 - bookworm.knowledge_graph - ERROR - query:536 - Error during query: Error code: 404 - {'error': {'message': 'model "gpt-4o-mini" not found, try pulling it first', 'type': 'api_error', 'param': None, 'code': None}}
+2025-08-08 00:38:11,176 - bookworm.knowledge_graph - INFO - query:522 - Querying with mode: local
+2025-08-08 00:38:11,228 - bookworm.knowledge_graph - ERROR - query:536 - Error during query: Error code: 404 - {'error': {'message': 'model "gpt-4o-mini" not found, try pulling it first', 'type': 'api_error', 'param': None, 'code': None}}
+2025-08-08 00:38:11,228 - bookworm.knowledge_graph - INFO - query:522 - Querying with mode: global
+2025-08-08 00:38:11,276 - bookworm.knowledge_graph - ERROR - query:536 - Error during query: Error code: 404 - {'error': {'message': 'model "gpt-4o-mini" not found, try pulling it first', 'type': 'api_error', 'param': None, 'code': None}}
+2025-08-08 00:38:11,276 - bookworm.knowledge_graph - INFO - query:522 - Querying with mode: hybrid
+2025-08-08 00:38:11,328 - bookworm.knowledge_graph - ERROR - query:536 - Error during query: Error code: 404 - {'error': {'message': 'model "gpt-4o-mini" not found, try pulling it first', 'type': 'api_error', 'param': None, 'code': None}}
+2025-08-08 00:38:36,350 - bookworm.knowledge_graph - INFO - initialize:398 - Initializing LightRAG Knowledge Graph...
+2025-08-08 00:38:36,376 - bookworm.knowledge_graph - WARNING - initialize:411 - Ollama LLM functions not available, using OpenAI
+2025-08-08 00:38:36,376 - bookworm.knowledge_graph - INFO - initialize:420 - Configuration:
+2025-08-08 00:38:36,376 - bookworm.knowledge_graph - INFO - initialize:421 -   Working Directory: ./bookworm_workspace
+2025-08-08 00:38:36,376 - bookworm.knowledge_graph - INFO - initialize:422 -   LLM Model: qwen3-coder:32b
+2025-08-08 00:38:36,376 - bookworm.knowledge_graph - INFO - initialize:423 -   Embedding Model: bge-m3:latest
+2025-08-08 00:38:36,376 - bookworm.knowledge_graph - INFO - initialize:454 - Using OpenAI as LLM provider
+2025-08-08 00:38:36,699 - bookworm.knowledge_graph - INFO - initialize:467 - LightRAG Knowledge Graph initialized successfully
+2025-08-08 00:38:36,700 - bookworm.processor - INFO - process_document:133 - Successfully processed document: lightrag_ex.py
+2025-08-08 00:38:36,702 - bookworm.knowledge_graph - ERROR - add_document:507 - Failed to add document 0c238407-e615-4502-b758-39aed5c5e5e3 to knowledge graph: cannot access local variable 'first_stage_tasks' where it is not associated with a value
+2025-08-08 00:38:36,702 - bookworm.processor - INFO - process_document:133 - Successfully processed document: lightrag_manager.py
+2025-08-08 00:38:36,703 - bookworm.knowledge_graph - ERROR - add_document:507 - Failed to add document d1d7cce7-a2cc-4cde-aedf-c2d9c5c7b391 to knowledge graph: cannot access local variable 'first_stage_tasks' where it is not associated with a value
+2025-08-08 00:38:36,703 - bookworm.processor - INFO - process_document:133 - Successfully processed document: bookworm_workspace/processed_docs/1ccb820a-5a1d-4796-a1de-ed7af69ad889_lightrag_manager.txt
+2025-08-08 00:38:36,704 - bookworm.knowledge_graph - ERROR - add_document:507 - Failed to add document 5747b6b5-4e86-46aa-a826-00ee17e15d4e to knowledge graph: cannot access local variable 'first_stage_tasks' where it is not associated with a value
+2025-08-08 00:38:36,705 - bookworm.processor - INFO - process_document:133 - Successfully processed document: bookworm_workspace/processed_docs/76af1809-8aec-43fc-9c9c-a3c41475b143_lightrag_ex.txt
+2025-08-08 00:38:36,706 - bookworm.knowledge_graph - ERROR - add_document:507 - Failed to add document 97e82409-1389-46bc-9d2d-8fbafa8ebad7 to knowledge graph: cannot access local variable 'first_stage_tasks' where it is not associated with a value
+2025-08-08 00:38:36,706 - bookworm.knowledge_graph - INFO - query:522 - Querying with mode: hybrid
+2025-08-08 00:38:36,924 - bookworm.knowledge_graph - ERROR - query:536 - Error during query: Error code: 404 - {'error': {'message': 'model "gpt-4o-mini" not found, try pulling it first', 'type': 'api_error', 'param': None, 'code': None}}
+2025-08-08 00:38:36,924 - bookworm.knowledge_graph - INFO - query:522 - Querying with mode: local
+2025-08-08 00:38:36,967 - bookworm.knowledge_graph - ERROR - query:536 - Error during query: Error code: 404 - {'error': {'message': 'model "gpt-4o-mini" not found, try pulling it first', 'type': 'api_error', 'param': None, 'code': None}}
+2025-08-08 00:38:36,967 - bookworm.knowledge_graph - INFO - query:522 - Querying with mode: global
+2025-08-08 00:38:37,012 - bookworm.knowledge_graph - ERROR - query:536 - Error during query: Error code: 404 - {'error': {'message': 'model "gpt-4o-mini" not found, try pulling it first', 'type': 'api_error', 'param': None, 'code': None}}
+2025-08-08 00:38:37,012 - bookworm.knowledge_graph - INFO - query:522 - Querying with mode: hybrid
+2025-08-08 00:38:37,066 - bookworm.knowledge_graph - ERROR - query:536 - Error during query: Error code: 404 - {'error': {'message': 'model "gpt-4o-mini" not found, try pulling it first', 'type': 'api_error', 'param': None, 'code': None}}
+2025-08-08 00:41:33,406 - bookworm.knowledge_graph - INFO - initialize:398 - Initializing LightRAG Knowledge Graph...
+2025-08-08 00:41:33,431 - bookworm.knowledge_graph - WARNING - initialize:411 - Ollama LLM functions not available, using OpenAI
+2025-08-08 00:41:33,432 - bookworm.knowledge_graph - INFO - initialize:420 - Configuration:
+2025-08-08 00:41:33,432 - bookworm.knowledge_graph - INFO - initialize:421 -   Working Directory: ./bookworm_workspace
+2025-08-08 00:41:33,432 - bookworm.knowledge_graph - INFO - initialize:422 -   LLM Model: qwen3-coder:30b
+2025-08-08 00:41:33,432 - bookworm.knowledge_graph - INFO - initialize:423 -   Embedding Model: bge-m3:latest
+2025-08-08 00:41:33,432 - bookworm.knowledge_graph - INFO - initialize:454 - Using OpenAI as LLM provider
+2025-08-08 00:41:33,780 - bookworm.knowledge_graph - INFO - initialize:467 - LightRAG Knowledge Graph initialized successfully
+2025-08-08 00:41:33,781 - bookworm.processor - INFO - process_document:133 - Successfully processed document: lightrag_ex.py
+2025-08-08 00:41:33,782 - bookworm.knowledge_graph - ERROR - add_document:507 - Failed to add document 812968b8-db99-434c-b5ec-a95f5156f60e to knowledge graph: cannot access local variable 'first_stage_tasks' where it is not associated with a value
+2025-08-08 00:41:33,783 - bookworm.processor - INFO - process_document:133 - Successfully processed document: lightrag_manager.py
+2025-08-08 00:41:33,784 - bookworm.knowledge_graph - ERROR - add_document:507 - Failed to add document 1ccb9f22-da2a-468a-9a78-232c82627ac7 to knowledge graph: cannot access local variable 'first_stage_tasks' where it is not associated with a value
+2025-08-08 00:41:33,784 - bookworm.processor - INFO - process_document:133 - Successfully processed document: bookworm_workspace/processed_docs/d1d7cce7-a2cc-4cde-aedf-c2d9c5c7b391_lightrag_manager.txt
+2025-08-08 00:41:33,785 - bookworm.knowledge_graph - ERROR - add_document:507 - Failed to add document 47be31a6-8ba9-4dfb-aca3-5a260f7eb7fc to knowledge graph: cannot access local variable 'first_stage_tasks' where it is not associated with a value
+2025-08-08 00:41:33,786 - bookworm.processor - INFO - process_document:133 - Successfully processed document: bookworm_workspace/processed_docs/0c238407-e615-4502-b758-39aed5c5e5e3_lightrag_ex.txt
+2025-08-08 00:41:33,787 - bookworm.knowledge_graph - ERROR - add_document:507 - Failed to add document b902fa91-ffca-469a-9a54-2cf7c3c22729 to knowledge graph: cannot access local variable 'first_stage_tasks' where it is not associated with a value
+2025-08-08 00:41:33,788 - bookworm.processor - INFO - process_document:133 - Successfully processed document: bookworm_workspace/processed_docs/1ccb820a-5a1d-4796-a1de-ed7af69ad889_lightrag_manager.txt
+2025-08-08 00:41:33,788 - bookworm.knowledge_graph - ERROR - add_document:507 - Failed to add document b73b04b7-09c8-4277-8c2c-1135d159486d to knowledge graph: cannot access local variable 'first_stage_tasks' where it is not associated with a value
+2025-08-08 00:41:33,790 - bookworm.processor - INFO - process_document:133 - Successfully processed document: bookworm_workspace/processed_docs/97e82409-1389-46bc-9d2d-8fbafa8ebad7_76af1809-8aec-43fc-9c9c-a3c41475b143_lightrag_ex.txt
+2025-08-08 00:41:33,791 - bookworm.knowledge_graph - ERROR - add_document:507 - Failed to add document 4496202d-65d5-466e-81c7-ab31473c744c to knowledge graph: cannot access local variable 'first_stage_tasks' where it is not associated with a value
+2025-08-08 00:41:33,791 - bookworm.processor - INFO - process_document:133 - Successfully processed document: bookworm_workspace/processed_docs/5747b6b5-4e86-46aa-a826-00ee17e15d4e_1ccb820a-5a1d-4796-a1de-ed7af69ad889_lightrag_manager.txt
+2025-08-08 00:41:33,792 - bookworm.knowledge_graph - ERROR - add_document:507 - Failed to add document daad8618-9770-41bd-967c-042cb87359d2 to knowledge graph: cannot access local variable 'first_stage_tasks' where it is not associated with a value
+2025-08-08 00:41:33,793 - bookworm.processor - INFO - process_document:133 - Successfully processed document: bookworm_workspace/processed_docs/76af1809-8aec-43fc-9c9c-a3c41475b143_lightrag_ex.txt
+2025-08-08 00:41:33,794 - bookworm.knowledge_graph - ERROR - add_document:507 - Failed to add document fd7dfbba-0b92-409f-aa77-9453a97094b1 to knowledge graph: cannot access local variable 'first_stage_tasks' where it is not associated with a value
+2025-08-08 00:41:33,794 - bookworm.knowledge_graph - INFO - query:522 - Querying with mode: hybrid
+2025-08-08 00:41:34,022 - bookworm.knowledge_graph - ERROR - query:536 - Error during query: Error code: 404 - {'error': {'message': 'model "gpt-4o-mini" not found, try pulling it first', 'type': 'api_error', 'param': None, 'code': None}}
+2025-08-08 00:41:34,022 - bookworm.knowledge_graph - INFO - query:522 - Querying with mode: local
+2025-08-08 00:41:34,065 - bookworm.knowledge_graph - ERROR - query:536 - Error during query: Error code: 404 - {'error': {'message': 'model "gpt-4o-mini" not found, try pulling it first', 'type': 'api_error', 'param': None, 'code': None}}
+2025-08-08 00:41:34,065 - bookworm.knowledge_graph - INFO - query:522 - Querying with mode: global
+2025-08-08 00:41:34,110 - bookworm.knowledge_graph - ERROR - query:536 - Error during query: Error code: 404 - {'error': {'message': 'model "gpt-4o-mini" not found, try pulling it first', 'type': 'api_error', 'param': None, 'code': None}}
+2025-08-08 00:41:34,110 - bookworm.knowledge_graph - INFO - query:522 - Querying with mode: hybrid
+2025-08-08 00:41:34,159 - bookworm.knowledge_graph - ERROR - query:536 - Error during query: Error code: 404 - {'error': {'message': 'model "gpt-4o-mini" not found, try pulling it first', 'type': 'api_error', 'param': None, 'code': None}}
+2025-08-08 00:42:08,943 - bookworm.knowledge_graph - INFO - initialize:398 - Initializing LightRAG Knowledge Graph...
+2025-08-08 00:42:09,050 - bookworm.knowledge_graph - INFO - initialize:409 - Using Ollama LLM functions
+2025-08-08 00:42:09,050 - bookworm.knowledge_graph - INFO - initialize:420 - Configuration:
+2025-08-08 00:42:09,050 - bookworm.knowledge_graph - INFO - initialize:421 -   Working Directory: ./bookworm_workspace
+2025-08-08 00:42:09,050 - bookworm.knowledge_graph - INFO - initialize:422 -   LLM Model: qwen3-coder:30b
+2025-08-08 00:42:09,050 - bookworm.knowledge_graph - INFO - initialize:423 -   Embedding Model: bge-m3:latest
+2025-08-08 00:43:33,968 - bookworm.knowledge_graph - INFO - initialize:398 - Initializing LightRAG Knowledge Graph...
+2025-08-08 00:43:34,045 - bookworm.knowledge_graph - INFO - initialize:409 - Using Ollama LLM functions
+2025-08-08 00:43:34,045 - bookworm.knowledge_graph - INFO - initialize:420 - Configuration:
+2025-08-08 00:43:34,045 - bookworm.knowledge_graph - INFO - initialize:421 -   Working Directory: ./bookworm_workspace
+2025-08-08 00:43:34,045 - bookworm.knowledge_graph - INFO - initialize:422 -   LLM Model: qwen3-coder:30b
+2025-08-08 00:43:34,045 - bookworm.knowledge_graph - INFO - initialize:423 -   Embedding Model: bge-m3:latest
+2025-08-08 00:43:34,580 - bookworm.knowledge_graph - INFO - initialize:464 - LightRAG Knowledge Graph initialized successfully
+2025-08-08 00:43:34,581 - bookworm.processor - INFO - process_document:133 - Successfully processed document: lightrag_ex.py
+2025-08-08 00:46:35,585 - bookworm.knowledge_graph - INFO - initialize:398 - Initializing LightRAG Knowledge Graph...
+2025-08-08 00:46:35,662 - bookworm.knowledge_graph - INFO - initialize:409 - Using Ollama LLM functions
+2025-08-08 00:46:35,662 - bookworm.knowledge_graph - INFO - initialize:420 - Configuration:
+2025-08-08 00:46:35,662 - bookworm.knowledge_graph - INFO - initialize:421 -   Working Directory: ./bookworm_workspace
+2025-08-08 00:46:35,662 - bookworm.knowledge_graph - INFO - initialize:422 -   LLM Model: qwen3-coder:30b
+2025-08-08 00:46:35,662 - bookworm.knowledge_graph - INFO - initialize:423 -   Embedding Model: bge-m3:latest
+2025-08-08 00:46:36,099 - bookworm.knowledge_graph - INFO - initialize:464 - LightRAG Knowledge Graph initialized successfully
+2025-08-08 00:46:36,099 - bookworm.processor - INFO - process_document:133 - Successfully processed document: bookworm_workspace/docs/sample_document.md
+2025-08-08 00:46:36,103 - bookworm.knowledge_graph - ERROR - add_document:504 - Failed to add document 8657ac83-a196-493a-958b-7e99648232be to knowledge graph: cannot access local variable 'first_stage_tasks' where it is not associated with a value
+2025-08-08 00:46:36,103 - bookworm.processor - INFO - process_document:133 - Successfully processed document: bookworm_workspace/docs/ai_overview.txt
+2025-08-08 00:46:36,138 - bookworm.knowledge_graph - ERROR - add_document:504 - Failed to add document 1c1be9b9-47a3-4b97-ac8d-fd95d247de37 to knowledge graph: cannot access local variable 'first_stage_tasks' where it is not associated with a value
+2025-08-08 00:46:36,138 - bookworm.knowledge_graph - INFO - query:519 - Querying with mode: hybrid
+2025-08-08 00:46:39,022 - bookworm.knowledge_graph - INFO - query:519 - Querying with mode: local
+2025-08-08 00:47:30,282 - bookworm.knowledge_graph - INFO - initialize:398 - Initializing LightRAG Knowledge Graph...
+2025-08-08 00:47:30,355 - bookworm.knowledge_graph - INFO - initialize:409 - Using Ollama LLM functions
+2025-08-08 00:47:30,355 - bookworm.knowledge_graph - INFO - initialize:420 - Configuration:
+2025-08-08 00:47:30,355 - bookworm.knowledge_graph - INFO - initialize:421 -   Working Directory: ./bookworm_workspace
+2025-08-08 00:47:30,355 - bookworm.knowledge_graph - INFO - initialize:422 -   LLM Model: qwen3-coder:30b
+2025-08-08 00:47:30,355 - bookworm.knowledge_graph - INFO - initialize:423 -   Embedding Model: bge-m3:latest
+2025-08-08 00:47:30,809 - bookworm.knowledge_graph - INFO - initialize:464 - LightRAG Knowledge Graph initialized successfully
+2025-08-08 00:47:30,810 - bookworm.processor - INFO - process_document:133 - Successfully processed document: bookworm_workspace/docs/sample_document.md
+2025-08-08 00:49:14,679 - bookworm.knowledge_graph - INFO - initialize:398 - Initializing LightRAG Knowledge Graph...
+2025-08-08 00:49:14,750 - bookworm.knowledge_graph - INFO - initialize:409 - Using Ollama LLM functions
+2025-08-08 00:49:14,750 - bookworm.knowledge_graph - INFO - initialize:420 - Configuration:
+2025-08-08 00:49:14,750 - bookworm.knowledge_graph - INFO - initialize:421 -   Working Directory: ./bookworm_workspace
+2025-08-08 00:49:14,750 - bookworm.knowledge_graph - INFO - initialize:422 -   LLM Model: qwen3-coder:30b
+2025-08-08 00:49:14,750 - bookworm.knowledge_graph - INFO - initialize:423 -   Embedding Model: bge-m3:latest
+2025-08-08 00:49:15,174 - bookworm.knowledge_graph - INFO - initialize:464 - LightRAG Knowledge Graph initialized successfully
+2025-08-08 00:49:15,174 - bookworm.processor - INFO - process_document:133 - Successfully processed document: bookworm_workspace/docs/sample_document.md
+2025-08-08 00:50:11,416 - bookworm.knowledge_graph - INFO - add_document:501 - Added document 075deafb-9730-40ed-86e4-da8ef3e109a8 to knowledge graph
+2025-08-08 00:50:11,417 - bookworm.processor - INFO - process_document:133 - Successfully processed document: bookworm_workspace/docs/ai_overview.txt
+2025-08-08 00:51:25,179 - bookworm.knowledge_graph - INFO - add_document:501 - Added document 280b91c2-7d77-4db0-b37e-0e46c1a90f5f to knowledge graph
+2025-08-08 00:51:25,179 - bookworm.knowledge_graph - INFO - query:519 - Querying with mode: hybrid
+2025-08-08 00:51:49,256 - bookworm.knowledge_graph - INFO - query:519 - Querying with mode: local
+2025-08-08 00:52:09,224 - bookworm.knowledge_graph - INFO - query:519 - Querying with mode: global
+2025-08-08 00:52:33,077 - bookworm.knowledge_graph - INFO - query:519 - Querying with mode: hybrid
+2025-08-08 00:54:38,975 - bookworm.knowledge_graph - INFO - initialize:398 - Initializing LightRAG Knowledge Graph...
+2025-08-08 00:54:39,060 - bookworm.knowledge_graph - INFO - initialize:409 - Using Ollama LLM functions
+2025-08-08 00:54:39,060 - bookworm.knowledge_graph - INFO - initialize:420 - Configuration:
+2025-08-08 00:54:39,060 - bookworm.knowledge_graph - INFO - initialize:421 -   Working Directory: ./bookworm_workspace
+2025-08-08 00:54:39,060 - bookworm.knowledge_graph - INFO - initialize:422 -   LLM Model: qwen3-coder:30b
+2025-08-08 00:54:39,060 - bookworm.knowledge_graph - INFO - initialize:423 -   Embedding Model: bge-m3:latest
+2025-08-08 00:54:39,562 - bookworm.knowledge_graph - INFO - initialize:464 - LightRAG Knowledge Graph initialized successfully
+2025-08-08 00:54:39,563 - bookworm.processor - INFO - process_document:133 - Successfully extracted text from document: bookworm_workspace/docs/sample_document.md (1933 chars)
+2025-08-08 00:54:39,563 - bookworm.knowledge_graph - INFO - add_document:500 - Adding document 6aaddd3f-5c0f-456e-b8b7-d0430030d666 to knowledge graph (this may take a while)...
+2025-08-08 00:54:39,563 - bookworm.knowledge_graph - INFO - add_document:502 - ✅ Successfully added document 6aaddd3f-5c0f-456e-b8b7-d0430030d666 to knowledge graph
+2025-08-08 00:54:39,563 - bookworm.processor - INFO - process_document:133 - Successfully extracted text from document: bookworm_workspace/docs/ai_overview.txt (2833 chars)
+2025-08-08 00:54:39,563 - bookworm.knowledge_graph - INFO - add_document:500 - Adding document 3cfbcaa4-41b5-4fca-843b-7655b558a1f5 to knowledge graph (this may take a while)...
+2025-08-08 00:54:39,564 - bookworm.knowledge_graph - INFO - add_document:502 - ✅ Successfully added document 3cfbcaa4-41b5-4fca-843b-7655b558a1f5 to knowledge graph
+2025-08-08 00:54:39,564 - bookworm.knowledge_graph - INFO - query:520 - Querying with mode: hybrid
+2025-08-08 00:54:39,564 - bookworm.knowledge_graph - INFO - query:520 - Querying with mode: local
+2025-08-08 00:54:39,564 - bookworm.knowledge_graph - INFO - query:520 - Querying with mode: global
+2025-08-08 00:54:39,565 - bookworm.knowledge_graph - INFO - query:520 - Querying with mode: hybrid
