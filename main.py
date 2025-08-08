@@ -4,6 +4,7 @@ BookWorm Document Processing System
 
 Each document creates its own knowledge graph for better isolation and scalability.
 No hardcoded sample data - processes real documents only.
+Now supports directory processing for Obsidian vaults and document collections.
 """
 import asyncio
 import logging
@@ -11,7 +12,49 @@ from pathlib import Path
 
 from bookworm.utils import BookWormConfig, load_config, setup_logging
 from bookworm.core import DocumentProcessor, KnowledgeGraph, MindmapGenerator
-from bookworm.library import LibraryManager, DocumentStatus
+from bookworm.library import LibraryManager, DocumentStatus, DocumentType
+
+
+async def process_directory_collection(processor, knowledge_graph, mindmap_generator, library_manager, directory_path):
+    """Process an entire directory as a single document"""
+    print(f"📁 Processing directory collection: {directory_path.name}")
+    
+    try:
+        # Check if directory is already processed in library
+        existing_doc = library_manager.get_document_by_filename(directory_path.name)
+        if existing_doc and existing_doc.status == DocumentStatus.PROCESSED:
+            print(f"    ⏭️  Directory already processed, skipping: {directory_path.name}")
+            return None
+        
+        # Process directory as single document
+        processed_doc = await processor.process_directory_as_single_document(directory_path)
+        
+        if processed_doc:
+            print(f"    📝 Combined text extracted: {len(processed_doc.text_content):,} characters")
+            print(f"    📄 Files processed: {processed_doc.metadata.get('file_count', 0)}")
+            
+            # Create individual knowledge graph for this directory collection
+            print("    🧠 Creating knowledge graph...")
+            doc_kg, library_doc_id = await knowledge_graph.create_document_graph(processed_doc)
+            print(f"    ✅ Knowledge graph created: {processed_doc.id[:8]}")
+            
+            # Generate mindmap
+            print("    🗺️  Generating mindmap visualization...")
+            try:
+                mindmap_result = await mindmap_generator.generate_mindmap(processed_doc, library_doc_id)
+                print(f"    ✅ Mindmap generated (tokens: {mindmap_result.token_usage.get('total_tokens', 0):,})")
+            except Exception as mindmap_error:
+                print(f"    ⚠️  Mindmap generation failed: {mindmap_error}")
+            
+            print(f"    ✅ Completed directory: {directory_path.name}")
+            return doc_kg
+        else:
+            print(f"    ❌ Failed to process directory: {directory_path.name}")
+            return None
+            
+    except Exception as e:
+        print(f"    ❌ Error processing directory {directory_path.name}: {e}")
+        return None
 
 
 async def process_documents():
@@ -39,37 +82,58 @@ async def process_documents():
     print(f"  💾 Total size: {stats.total_size_bytes:,} bytes")
     print()
     
-    print("📁 Scanning for documents to process...")
+    print("📁 Scanning for documents and directories to process...")
     
-    # Look for documents in the workspace docs directory
+    # Look for documents and directories in the workspace docs directory
     docs_to_process = []
+    dirs_to_process = []
     workspace_path = Path(config.working_dir)
     docs_dir = workspace_path / "docs"
     
     # Only check the docs directory to avoid duplicates
     if docs_dir.exists():
-        for file_path in docs_dir.rglob("*"):
-            if file_path.is_file() and file_path.suffix.lower() in ['.txt', '.md', '.pdf', '.docx']:
+        for item_path in docs_dir.iterdir():
+            if item_path.is_file() and item_path.suffix.lower() in ['.txt', '.md', '.pdf', '.docx']:
                 # Skip if it's in processed directories
-                if 'processed' not in str(file_path) and 'output' not in str(file_path):
-                    docs_to_process.append(file_path)
+                if 'processed' not in str(item_path) and 'output' not in str(item_path):
+                    docs_to_process.append(item_path)
+            elif item_path.is_dir() and not item_path.name.startswith('.'):
+                # Check if directory contains supported files
+                has_supported_files = any(
+                    f.is_file() and f.suffix.lower() in ['.txt', '.md', '.pdf', '.docx']
+                    for f in item_path.rglob("*")
+                )
+                if has_supported_files:
+                    dirs_to_process.append(item_path)
     
-    if not docs_to_process:
-        print("📝 No documents found in workspace.")
-        print(f"   Add documents to: {docs_dir}")
+    if not docs_to_process and not dirs_to_process:
+        print("📝 No documents or directories found in workspace.")
+        print(f"   Add documents/directories to: {docs_dir}")
         print("   Supported formats: .txt, .md, .pdf, .docx")
+        print("   Directories: Obsidian vaults, document collections")
         return
     
-    print(f"📄 Found {len(docs_to_process)} documents to process:")
-    for doc_path in docs_to_process:
-        print(f"  • {doc_path.name}")
+    if docs_to_process:
+        print(f"📄 Found {len(docs_to_process)} individual documents:")
+        for doc_path in docs_to_process:
+            print(f"  • {doc_path.name}")
+    
+    if dirs_to_process:
+        print(f"📁 Found {len(dirs_to_process)} directories to process as collections:")
+        for dir_path in dirs_to_process:
+            # Count files in directory
+            file_count = sum(1 for f in dir_path.rglob("*") 
+                           if f.is_file() and f.suffix.lower() in ['.txt', '.md', '.pdf', '.docx'])
+            print(f"  • {dir_path.name} ({file_count} files)")
+    
     print()
     
-    # Process each document individually
+    # Process documents and directories
     document_graphs = {}
     
+    # Process individual documents first
     for file_path in docs_to_process:
-        print(f"🔄 Processing: {file_path.name}")
+        print(f"🔄 Processing document: {file_path.name}")
         
         try:
             # Check if document is already processed in library
@@ -104,6 +168,14 @@ async def process_documents():
                 
         except Exception as e:
             print(f"    ❌ Error processing {file_path.name}: {e}")
+    
+    # Process directories as collections
+    for dir_path in dirs_to_process:
+        doc_kg = await process_directory_collection(
+            processor, knowledge_graph, mindmap_generator, library_manager, dir_path
+        )
+        if doc_kg:
+            document_graphs[f"dir_{dir_path.name}"] = doc_kg
     
     if document_graphs:
         print(f"\n🎉 Successfully processed {len(document_graphs)} documents")

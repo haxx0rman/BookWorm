@@ -238,6 +238,87 @@ class DocumentProcessor:
         
         self.logger.info(f"Processed {len(documents)} documents from {directory_path}")
         return documents
+    
+    async def process_directory_as_single_document(self, directory_path: Union[str, Path]) -> Optional[ProcessedDocument]:
+        """Process an entire directory as a single document (for Obsidian vaults, doc collections)"""
+        directory_path = Path(directory_path)
+        
+        if not directory_path.exists():
+            self.logger.error(f"Directory not found: {directory_path}")
+            return None
+        
+        if not directory_path.is_dir():
+            self.logger.error(f"Path is not a directory: {directory_path}")
+            return None
+        
+        self.logger.info(f"Processing directory as single document: {directory_path.name}")
+        
+        # Create processed document for the directory
+        doc = ProcessedDocument(
+            original_path=str(directory_path.absolute()),
+            file_type="directory",
+            file_size=0,
+            status="processing"
+        )
+        
+        try:
+            # Collect all supported files in the directory
+            file_paths = []
+            total_size = 0
+            combined_text = []
+            
+            for file_path in directory_path.rglob("*"):
+                if file_path.is_file() and is_supported_file(file_path):
+                    file_paths.append(str(file_path.relative_to(directory_path)))
+                    total_size += file_path.stat().st_size
+                    
+                    # Extract text from each file
+                    try:
+                        file_text = await self._extract_text(file_path)
+                        if file_text:
+                            # Add file header to maintain context
+                            relative_path = file_path.relative_to(directory_path)
+                            combined_text.append(f"\n# File: {relative_path}\n\n{file_text}\n")
+                            self.logger.debug(f"Added text from: {relative_path}")
+                    except Exception as e:
+                        self.logger.warning(f"Failed to extract text from {file_path}: {e}")
+                        continue
+            
+            if not combined_text:
+                doc.status = "failed"
+                doc.error_message = "No extractable text found in directory"
+                self.logger.error(f"❌ No extractable text found in: {directory_path.name}")
+                return None
+            
+            # Combine all text content
+            doc.text_content = "\n".join(combined_text)
+            doc.file_size = total_size
+            
+            # Store metadata about the directory
+            doc.metadata = {
+                "is_directory": True,
+                "sub_files": file_paths,
+                "file_count": len(file_paths),
+                "directory_name": directory_path.name,
+                "processing_type": "directory_collection"
+            }
+            
+            # Save processed text
+            processed_dir = Path(self.config.processed_dir)
+            processed_dir.mkdir(parents=True, exist_ok=True)
+            processed_file = processed_dir / f"{doc.id}_{directory_path.name}.txt"
+            processed_file.write_text(doc.text_content, encoding='utf-8')
+            doc.processed_path = str(processed_file)
+            doc.status = "completed"
+            
+            self.logger.info(f"✅ Successfully processed directory: {directory_path.name} ({len(file_paths)} files)")
+            return doc
+            
+        except Exception as e:
+            doc.status = "failed"
+            doc.error_message = str(e)
+            self.logger.error(f"❌ Error processing directory {directory_path.name}: {e}")
+            return None
 
 
 class DocumentKnowledgeGraph:
@@ -437,12 +518,32 @@ class KnowledgeGraph:
         # Add to library manager
         library_doc_id = None
         try:
-            if Path(document.original_path).exists():
+            # Determine if this is a directory or file
+            original_path = Path(document.original_path)
+            is_directory = document.metadata.get("is_directory", False) or original_path.is_dir()
+            
+            if original_path.exists():
                 # Check if document already exists in library
-                existing_docs = self.library_manager.find_documents(filename=Path(document.original_path).name)
+                search_name = original_path.name
+                existing_docs = self.library_manager.find_documents(filename=search_name)
+                
                 if not existing_docs:
+                    # Add new document to library
                     library_doc_id = self.library_manager.add_document(filepath=document.original_path)
                     self.logger.info(f"📚 Document {library_doc_id} added to library index")
+                    
+                    # If it's a directory, update the document record with directory metadata
+                    if is_directory and document.metadata.get("sub_files"):
+                        self.library_manager.update_document_metadata(
+                            library_doc_id,
+                            {
+                                "is_directory": True,
+                                "sub_files": document.metadata.get("sub_files", []),
+                                "file_count": document.metadata.get("file_count", 0),
+                                "processing_type": document.metadata.get("processing_type", "directory_collection")
+                            }
+                        )
+                        self.logger.info(f"📁 Directory metadata saved for {search_name}")
                 else:
                     # Update existing document status
                     existing_doc = existing_docs[0]
@@ -463,7 +564,7 @@ class KnowledgeGraph:
                     self.logger.info(f"📚 Document {library_doc_id} status updated to PROCESSED")
                     self.logger.info(f"📚 Knowledge graph path saved to library: {doc_kg.doc_working_dir}")
             else:
-                self.logger.warning(f"Original file {document.original_path} not found, skipping library update")
+                self.logger.warning(f"Original file/directory {document.original_path} not found, skipping library update")
         except Exception as e:
             self.logger.warning(f"Failed to update library for document {document.id}: {e}")
         

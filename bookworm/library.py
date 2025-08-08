@@ -28,8 +28,9 @@ class DocumentType(Enum):
     PDF = "pdf"
     TEXT = "text"
     MARKDOWN = "markdown"
-    DOCX = "docx"
-    HTML = "html"
+    WORD = "word"
+    POWERPOINT = "powerpoint"
+    DIRECTORY = "directory"
     UNKNOWN = "unknown"
 
 
@@ -57,6 +58,11 @@ class DocumentRecord:
     tags: Set[str] = field(default_factory=set)
     word_count: Optional[int] = None
     
+    # Directory-specific fields
+    is_directory: bool = False
+    sub_files: List[str] = field(default_factory=list)  # List of file paths within directory
+    file_count: Optional[int] = None  # Number of files in directory
+    
     # Error tracking
     error_message: Optional[str] = None
     retry_count: int = 0
@@ -80,6 +86,9 @@ class DocumentRecord:
             'author': self.author,
             'tags': list(self.tags),
             'word_count': self.word_count,
+            'is_directory': self.is_directory,
+            'sub_files': self.sub_files,
+            'file_count': self.file_count,
             'error_message': self.error_message,
             'retry_count': self.retry_count
         }
@@ -104,6 +113,9 @@ class DocumentRecord:
             author=data.get('author'),
             tags=set(data.get('tags', [])),
             word_count=data.get('word_count'),
+            is_directory=data.get('is_directory', False),
+            sub_files=data.get('sub_files', []),
+            file_count=data.get('file_count'),
             error_message=data.get('error_message'),
             retry_count=data.get('retry_count', 0)
         )
@@ -358,8 +370,21 @@ class LibraryManager:
         doc_id = str(uuid.uuid4())
         filename = filename or file_path.name
         
-        # Determine file type
-        file_type = self._get_file_type(file_path.suffix.lower())
+        # Determine file type - handle directories
+        if file_path.is_dir():
+            file_type = DocumentType.DIRECTORY
+            file_size = sum(f.stat().st_size for f in file_path.rglob("*") if f.is_file())
+            # Collect sub-files for directory processing
+            sub_files = [
+                str(f.relative_to(file_path)) for f in file_path.rglob("*") 
+                if f.is_file() and f.suffix.lower() in {'.pdf', '.txt', '.md', '.markdown', '.docx', '.doc'}
+            ]
+            file_count = len(sub_files)
+        else:
+            file_type = self._get_file_type(file_path.suffix.lower())
+            file_size = file_path.stat().st_size
+            sub_files = []
+            file_count = None
         
         # Create document record
         document = DocumentRecord(
@@ -367,17 +392,21 @@ class LibraryManager:
             filename=filename,
             filepath=str(file_path.absolute()),
             file_type=file_type,
-            file_size=file_path.stat().st_size,
+            file_size=file_size,
             status=DocumentStatus.PENDING,
             created_at=datetime.now(),
-            updated_at=datetime.now()
+            updated_at=datetime.now(),
+            is_directory=file_path.is_dir(),
+            sub_files=sub_files,
+            file_count=file_count
         )
         
         self.documents[doc_id] = document
         self._update_stats()
         self._save_library_state()
         
-        self.logger.info(f"📄 Added document to library: {filename} (ID: {doc_id})")
+        doc_type = "directory" if file_path.is_dir() else "document"
+        self.logger.info(f"📄 Added {doc_type} to library: {filename} (ID: {doc_id})")
         return doc_id
     
     def update_document_status(self, doc_id: str, status: DocumentStatus, 
@@ -548,10 +577,11 @@ class LibraryManager:
             '.txt': DocumentType.TEXT,
             '.md': DocumentType.MARKDOWN,
             '.markdown': DocumentType.MARKDOWN,
-            '.docx': DocumentType.DOCX,
-            '.doc': DocumentType.DOCX,
-            '.html': DocumentType.HTML,
-            '.htm': DocumentType.HTML
+            '.docx': DocumentType.WORD,
+            '.doc': DocumentType.WORD,
+            '.pptx': DocumentType.POWERPOINT,
+            '.ppt': DocumentType.POWERPOINT,
+            'directory': DocumentType.DIRECTORY  # Special case for directories
         }
         return type_map.get(extension, DocumentType.UNKNOWN)
     
