@@ -40,3 +40,4 @@ Thumbs.db
 test_debug.py
 *_test.py
 debug_*
+logs/bookworm.log

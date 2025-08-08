@@ -4,13 +4,14 @@ Integrates Dicklesworthstone mindmap-generator features with BookWorm system
 """
 import json
 import logging
+import os
 import re
 import time
 import base64
 import zlib
 from datetime import datetime
 from enum import Enum
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 from dataclasses import dataclass, field
 
 # Optional imports with fallbacks
@@ -250,7 +251,7 @@ Example: ["Easy to use", "Flexible configuration", "Good performance"]"""
                 self.type_prompts[doc_type] = self.type_prompts[DocumentType.GENERAL]
     
     async def generate_mindmap_from_text(self, text_content: str, document_id: str) -> MindmapGenerationResult:
-        """Generate a comprehensive mindmap with advanced features"""
+        """Generate a comprehensive mindmap with advanced features and chunking support"""
         start_time = time.time()
         
         try:
@@ -263,8 +264,15 @@ Example: ["Easy to use", "Flexible configuration", "Good performance"]"""
             doc_type = await self._detect_document_type(text_content)
             self.logger.info(f"📋 Detected document type: {doc_type.value}")
             
-            # Generate mindmap with enhanced processing
-            mindmap_result = await self._generate_enhanced_mindmap(text_content, doc_type, document_id)
+            # Check if document needs chunking
+            needs_chunking = self._needs_chunking(text_content)
+            
+            if needs_chunking:
+                self.logger.info(f"📚 Document is large ({len(text_content.split()):,} words), using chunked processing")
+                mindmap_result = await self._generate_chunked_mindmap(text_content, doc_type, document_id)
+            else:
+                self.logger.info(f"📄 Document size manageable, using standard processing")
+                mindmap_result = await self._generate_enhanced_mindmap(text_content, doc_type, document_id)
             
             # Generate outputs
             html_content = self._generate_enhanced_html(mindmap_result)
@@ -295,6 +303,216 @@ Example: ["Easy to use", "Flexible configuration", "Good performance"]"""
         except Exception as e:
             self.logger.error(f"❌ Advanced mindmap generation failed: {e}")
             raise MindMapGenerationError(f"Failed to generate advanced mindmap: {e}")
+    
+    def _needs_chunking(self, text_content: str) -> bool:
+        """Determine if document needs chunking based on size"""
+        word_count = len(text_content.split())
+        char_count = len(text_content)
+        
+        # Thresholds for chunking (configurable via environment variables)
+        MAX_WORDS = int(os.getenv('BOOKWORM_CHUNK_MAX_WORDS', '2000'))  # Reduced for testing
+        MAX_CHARS = int(os.getenv('BOOKWORM_CHUNK_MAX_CHARS', '10000'))  # Reduced for testing
+        
+        self.logger.info(f"📊 Document size: {word_count} words, {char_count} chars. Thresholds: {MAX_WORDS} words, {MAX_CHARS} chars")
+        
+        needs_chunking = word_count > MAX_WORDS or char_count > MAX_CHARS
+        if needs_chunking:
+            self.logger.info(f"📄 Document exceeds thresholds, will use chunking")
+        else:
+            self.logger.info(f"📄 Document size manageable, using standard processing")
+        
+        return needs_chunking
+    
+    def _create_chunks(self, text_content: str, chunk_size: Optional[int] = None, overlap: Optional[int] = None) -> List[Dict[str, Any]]:
+        """Split text into overlapping chunks for processing"""
+        # Use environment variables for chunk configuration
+        if chunk_size is None:
+            chunk_size = int(os.getenv('BOOKWORM_CHUNK_SIZE', '1500'))  # Reduced for testing
+        if overlap is None:
+            overlap = int(os.getenv('BOOKWORM_CHUNK_OVERLAP', '200'))  # Reduced for testing
+            
+        words = text_content.split()
+        chunks = []
+        
+        self.logger.info(f"📦 Creating chunks with size: {chunk_size} words, overlap: {overlap} words")
+        
+        if len(words) <= chunk_size:
+            return [{"text": text_content, "start": 0, "end": len(words), "index": 0}]
+        
+        start = 0
+        chunk_index = 0
+        
+        while start < len(words):
+            end = min(start + chunk_size, len(words))
+            chunk_text = " ".join(words[start:end])
+            
+            chunks.append({
+                "text": chunk_text,
+                "start": start,
+                "end": end,
+                "index": chunk_index,
+                "word_count": end - start
+            })
+            
+            # Move start position with overlap consideration
+            if end == len(words):
+                break
+            start = end - overlap
+            chunk_index += 1
+        
+        self.logger.info(f"📊 Created {len(chunks)} chunks with {overlap} word overlap")
+        return chunks
+    
+    async def _generate_chunked_mindmap(self, text_content: str, doc_type: DocumentType, document_id: str) -> str:
+        """Generate mindmap from large document using chunking approach"""
+        try:
+            # Create chunks
+            chunks = self._create_chunks(text_content)
+            self.logger.info(f"🔄 Processing {len(chunks)} chunks for document {document_id}")
+            
+            # Generate partial mindmaps for each chunk
+            chunk_mindmaps = []
+            chunk_topics = []
+            
+            for i, chunk in enumerate(chunks):
+                self.logger.info(f"📝 Processing chunk {i+1}/{len(chunks)} ({chunk['word_count']} words)")
+                
+                try:
+                    # Generate mindmap for this chunk
+                    chunk_result = await self._generate_enhanced_mindmap(chunk["text"], doc_type, f"{document_id}_chunk_{i}")
+                    chunk_mindmaps.append({
+                        "index": i,
+                        "mermaid": chunk_result,
+                        "word_count": chunk["word_count"]
+                    })
+                    
+                    # Extract topics from this chunk for merging
+                    chunk_topics_data = await self._extract_topics_enhanced(chunk["text"], doc_type)
+                    # Convert to the format expected by _merge_chunk_topics
+                    for topic in chunk_topics_data:
+                        chunk_topics.append({
+                            'name': topic.get('name', ''),
+                            'description': f"Topic from chunk {i+1}",
+                            'categories': [doc_type.value],
+                            'importance': 'medium'
+                        })
+                    
+                except Exception as e:
+                    self.logger.warning(f"⚠️ Failed to process chunk {i+1}: {e}")
+                    continue
+            
+            # Merge and deduplicate topics across chunks
+            merged_topics = self._merge_chunk_topics(chunk_topics)
+            self.logger.info(f"🔗 Merged {len(chunk_topics)} chunk topics into {len(merged_topics)} unified topics")
+            
+            # Generate final unified mindmap
+            unified_mindmap = await self._create_unified_mindmap(merged_topics, text_content, doc_type)
+            
+            return unified_mindmap
+            
+        except Exception as e:
+            self.logger.error(f"❌ Chunked mindmap generation failed: {e}")
+            # Fallback to standard processing with truncated content
+            truncated_content = " ".join(text_content.split()[:8000])
+            self.logger.info("🔄 Falling back to standard processing with truncated content")
+            return await self._generate_enhanced_mindmap(truncated_content, doc_type, document_id)
+    
+    def _merge_chunk_topics(self, chunk_topics: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Merge and deduplicate topics from multiple chunks"""
+        merged_topics = {}
+        
+        for topic in chunk_topics:
+            topic_name = topic.get('name', '').strip().lower()
+            
+            if not topic_name:
+                continue
+            
+            # Use fuzzy matching to detect similar topics
+            similar_key = None
+            if fuzz:
+                for existing_key in merged_topics.keys():
+                    similarity = fuzz.ratio(topic_name, existing_key)
+                    if similarity > 80:  # 80% similarity threshold
+                        similar_key = existing_key
+                        break
+            
+            if similar_key:
+                # Merge with existing topic
+                existing_topic = merged_topics[similar_key]
+                
+                # Combine descriptions
+                if topic.get('description') and topic['description'] not in existing_topic.get('description', ''):
+                    existing_topic['description'] = f"{existing_topic.get('description', '')} {topic['description']}".strip()
+                
+                # Merge categories
+                existing_categories = set(existing_topic.get('categories', []))
+                new_categories = set(topic.get('categories', []))
+                existing_topic['categories'] = list(existing_categories.union(new_categories))
+                
+                # Increase confidence/frequency
+                existing_topic['frequency'] = existing_topic.get('frequency', 1) + 1
+                
+            else:
+                # Add as new topic
+                merged_topics[topic_name] = {
+                    'name': topic.get('name', topic_name),
+                    'description': topic.get('description', ''),
+                    'categories': topic.get('categories', []),
+                    'frequency': 1,
+                    'importance': topic.get('importance', 'medium')
+                }
+        
+        # Sort by frequency and importance
+        sorted_topics = sorted(
+            merged_topics.values(), 
+            key=lambda x: (x.get('frequency', 1), 1 if x.get('importance') == 'high' else 0), 
+            reverse=True
+        )
+        
+        return sorted_topics[:15]  # Limit to top 15 topics
+    
+    async def _create_unified_mindmap(self, merged_topics: List[Dict[str, Any]], full_text: str, doc_type: DocumentType) -> str:
+        """Create a unified mindmap from merged topics"""
+        try:
+            # Process merged topics similar to standard flow
+            processed_topics = []
+            for i, topic in enumerate(merged_topics):
+                self.logger.info(f"🔗 Processing unified topic {i+1}/{len(merged_topics)}: '{topic['name']}'")
+                
+                # Use a sample of the full text for context (to avoid token limits)
+                context_sample = " ".join(full_text.split()[:2000])
+                processed_topic = await self._process_topic_enhanced(topic, context_sample, doc_type)
+                processed_topics.append(processed_topic)
+            
+            # Generate mindmap with reality check against full document sample
+            concepts = {
+                'central_theme': self._create_node('📄 Document Mindmap (Unified)', 'high'),
+                'processed_topics': processed_topics
+            }
+            
+            # Verify against a sample of the source document
+            verification_sample = " ".join(full_text.split()[:3000])
+            verified_concepts = await self._verify_mindmap_against_source(concepts, verification_sample)
+            
+            # Generate final Mermaid syntax
+            return self._generate_mermaid_mindmap(verified_concepts)
+            
+        except Exception as e:
+            self.logger.error(f"❌ Unified mindmap creation failed: {e}")
+            # Create a simple fallback mindmap
+            return self._create_fallback_mindmap(merged_topics)
+    
+    def _create_fallback_mindmap(self, topics: List[Dict[str, Any]]) -> str:
+        """Create a simple fallback mindmap when advanced processing fails"""
+        lines = ["graph TD"]
+        lines.append("    Root[📄 Document Mindmap]")
+        
+        for i, topic in enumerate(topics[:10]):  # Limit to top 10
+            topic_id = f"T{i+1}"
+            topic_name = topic.get('name', f'Topic {i+1}')
+            lines.append(f"    Root --> {topic_id}[{topic_name}]")
+        
+        return "\n".join(lines)
     
     def _reset_tracking(self):
         """Reset tracking variables for new document"""

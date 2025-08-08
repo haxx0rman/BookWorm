@@ -81,6 +81,108 @@ class MindmapResult:
     token_usage: Dict[str, int] = field(default_factory=dict)
 
 
+class DocumentDescriptionGenerator:
+    """Generate AI descriptions for documents"""
+    
+    def __init__(self, config: BookWormConfig):
+        self.config = config
+        self.logger = logging.getLogger(__name__)
+        
+        # Initialize Ollama client (same pattern as mindmap generator)
+        self.ollama_client = None
+        try:
+            from openai import AsyncOpenAI
+            if self.config.api_provider == "OLLAMA":
+                ollama_url = f"{self.config.llm_host}/v1"
+                self.ollama_client = AsyncOpenAI(
+                    api_key="ollama",  # Ollama doesn't require a real API key
+                    base_url=ollama_url
+                )
+        except ImportError:
+            self.logger.warning("OpenAI client not available for Ollama integration")
+        
+    async def generate_description(self, document: ProcessedDocument) -> Optional[str]:
+        """Generate an AI description for a document"""
+        try:
+            # Prepare the text for description generation
+            text_content = document.text_content
+            
+            # Truncate text if too long (keep first 2000 characters for context)
+            if len(text_content) > 2000:
+                text_content = text_content[:2000] + "..."
+            
+            # Determine document type for better prompting
+            doc_type = "directory collection" if document.metadata.get("is_directory", False) else "document"
+            file_info = ""
+            if document.metadata.get("is_directory", False):
+                file_count = document.metadata.get("file_count", 0)
+                file_info = f" containing {file_count} files"
+            
+            # Create prompt for description generation
+            prompt = f"""Analyze the following {doc_type}{file_info} and provide a concise, informative description (2-3 sentences) that captures:
+
+1. The main topic or subject matter
+2. The type of content (academic, technical, business, etc.)
+3. Key themes or focus areas
+
+Text to analyze:
+{text_content}
+
+Provide only the description, no additional formatting or labels."""
+
+            # Generate description using Ollama client
+            try:
+                if self.ollama_client:
+                    response = await self.ollama_client.chat.completions.create(
+                        model=self.config.llm_model,
+                        messages=[{"role": "user", "content": prompt}],
+                        max_tokens=150,
+                        temperature=0.3
+                    )
+                    
+                    description = response.choices[0].message.content or ""
+                    
+                    if description:
+                        # Clean up the description
+                        description = description.strip()
+                        # Remove any prefix like "Description:" if the model includes it
+                        if description.lower().startswith("description:"):
+                            description = description[12:].strip()
+                        
+                        self.logger.info(f"📝 Generated description for document {document.id[:8]}: {description[:50]}...")
+                        return description
+                    else:
+                        self.logger.warning(f"⚠️ Empty description generated for document {document.id}")
+                        return self.generate_fallback_description(document)
+                else:
+                    self.logger.warning("⚠️ Ollama client not available, using fallback description")
+                    return self.generate_fallback_description(document)
+                    
+            except Exception as e:
+                self.logger.error(f"❌ Error calling Ollama for description generation: {e}")
+                return self.generate_fallback_description(document)
+                
+        except Exception as e:
+            self.logger.error(f"❌ Error generating description for document {document.id}: {e}")
+            return self.generate_fallback_description(document)
+    
+    def generate_fallback_description(self, document: ProcessedDocument) -> str:
+        """Generate a simple fallback description based on metadata"""
+        try:
+            doc_type = "Directory collection" if document.metadata.get("is_directory", False) else "Document"
+            
+            if document.metadata.get("is_directory", False):
+                file_count = document.metadata.get("file_count", 0)
+                return f"{doc_type} containing {file_count} files with {len(document.text_content):,} characters of combined content."
+            else:
+                word_count = len(document.text_content.split()) if document.text_content else 0
+                return f"{doc_type} with approximately {word_count:,} words covering various topics."
+                
+        except Exception as e:
+            self.logger.error(f"❌ Error generating fallback description: {e}")
+            return "Document processed successfully."
+
+
 class DocumentProcessor:
     """Process documents and extract knowledge"""
     
@@ -678,33 +780,8 @@ class MindmapGenerator:
     async def _save_mindmap_files(self, result: MindmapResult, document: ProcessedDocument, document_library_id: Optional[str] = None) -> None:
         """Save mindmap files and update library"""
         doc_name = Path(document.original_path).stem
-        output_dir = Path("./bookworm_workspace/mindmaps") / result.document_id
-        output_dir.mkdir(parents=True, exist_ok=True)
         
-        mindmap_files = {}
-        
-        # Save Mermaid syntax
-        if result.mermaid_syntax:
-            mermaid_file = output_dir / f"{doc_name}_mindmap.mmd"
-            mermaid_file.write_text(result.mermaid_syntax)
-            mindmap_files["mermaid"] = str(mermaid_file)
-            self.logger.info(f"💾 Saved Mermaid: {mermaid_file}")
-        
-        # Save HTML content
-        if result.html_content:
-            html_file = output_dir / f"{doc_name}_mindmap.html"
-            html_file.write_text(result.html_content)
-            mindmap_files["html"] = str(html_file)
-            self.logger.info(f"💾 Saved HTML: {html_file}")
-        
-        # Save Markdown outline
-        if result.markdown_outline:
-            md_file = output_dir / f"{doc_name}_outline.md"
-            md_file.write_text(result.markdown_outline)
-            mindmap_files["markdown"] = str(md_file)
-            self.logger.info(f"💾 Saved Markdown: {md_file}")
-        
-        # Add mindmap to library
+        # Add mindmap to library first to get the mindmap ID
         try:
             # Reload library data to ensure we have the latest state
             self.library_manager._load_library_state()
@@ -723,6 +800,7 @@ class MindmapGenerator:
                     self.logger.error(f"Could not find document in library: {Path(document.original_path).name}")
                     return
             
+            # Create temporary mindmap record to get ID
             mindmap_metadata = {
                 'document_type': 'unknown',
                 'token_usage': result.token_usage.get('total_tokens', 0),
@@ -734,10 +812,37 @@ class MindmapGenerator:
             }
             mindmap_id = self.library_manager.add_mindmap(
                 document_id=doc_id,
-                mindmap_files=mindmap_files,
+                mindmap_files={},  # Will update with actual files below
                 metadata=mindmap_metadata
             )
             self.logger.info(f"📚 Mindmap {mindmap_id} added to library")
+            
+            # Now save files using the mindmap ID
+            output_dir = Path("./bookworm_workspace/mindmaps") / mindmap_id
+            output_dir.mkdir(parents=True, exist_ok=True)
+            
+            mindmap_files = {}
+            
+            # Save Mermaid syntax
+            if result.mermaid_syntax:
+                mermaid_file = output_dir / f"{doc_name}_mindmap.mmd"
+                mermaid_file.write_text(result.mermaid_syntax)
+                mindmap_files["mermaid"] = str(mermaid_file)
+                self.logger.info(f"💾 Saved Mermaid: {mermaid_file}")
+            
+            # Save HTML content
+            if result.html_content:
+                html_file = output_dir / f"{doc_name}_mindmap.html"
+                html_file.write_text(result.html_content)
+                mindmap_files["html"] = str(html_file)
+                self.logger.info(f"� Saved HTML: {html_file}")
+            
+            # Save Markdown outline
+            if result.markdown_outline:
+                md_file = output_dir / f"{doc_name}_outline.md"
+                md_file.write_text(result.markdown_outline)
+                mindmap_files["markdown"] = str(md_file)
+                self.logger.info(f"💾 Saved Markdown: {md_file}")
             
             # Update the document record with the mindmap ID
             self.library_manager.update_document_metadata(
@@ -745,6 +850,7 @@ class MindmapGenerator:
                 {"mindmap_id": mindmap_id}
             )
             self.logger.info(f"📚 Document {doc_id} updated with mindmap ID: {mindmap_id}")
+            
         except Exception as e:
             self.logger.error(f"Failed to add mindmap to library: {e}")
             import traceback

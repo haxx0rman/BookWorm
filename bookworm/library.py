@@ -55,6 +55,7 @@ class DocumentRecord:
     # Metadata
     title: Optional[str] = None
     author: Optional[str] = None
+    description: Optional[str] = None  # AI-generated description of document content
     tags: Set[str] = field(default_factory=set)
     word_count: Optional[int] = None
     
@@ -84,6 +85,7 @@ class DocumentRecord:
             'mindmap_id': self.mindmap_id,
             'title': self.title,
             'author': self.author,
+            'description': self.description,
             'tags': list(self.tags),
             'word_count': self.word_count,
             'is_directory': self.is_directory,
@@ -111,6 +113,7 @@ class DocumentRecord:
             mindmap_id=data.get('mindmap_id'),
             title=data.get('title'),
             author=data.get('author'),
+            description=data.get('description'),
             tags=set(data.get('tags', [])),
             word_count=data.get('word_count'),
             is_directory=data.get('is_directory', False),
