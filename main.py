@@ -11,11 +11,11 @@ import logging
 from pathlib import Path
 
 from bookworm.utils import BookWormConfig, load_config, setup_logging
-from bookworm.core import DocumentProcessor, KnowledgeGraph, MindmapGenerator, DocumentDescriptionGenerator
+from bookworm.core import DocumentProcessor, KnowledgeGraph, MindmapGenerator
 from bookworm.library import LibraryManager, DocumentStatus, DocumentType
 
 
-async def process_directory_collection(processor, knowledge_graph, mindmap_generator, description_generator, library_manager, directory_path):
+async def process_directory_collection(processor, knowledge_graph, mindmap_generator, library_manager, directory_path):
     """Process an entire directory as a single document"""
     print(f"📁 Processing directory collection: {directory_path.name}")
     
@@ -33,30 +33,51 @@ async def process_directory_collection(processor, knowledge_graph, mindmap_gener
             print(f"    📝 Combined text extracted: {len(processed_doc.text_content):,} characters")
             print(f"    📄 Files processed: {processed_doc.metadata.get('file_count', 0)}")
             
-            # Generate AI description
-            print("    📄 Generating AI description...")
-            try:
-                description = await description_generator.generate_description(processed_doc)
-                if description:
-                    print(f"    ✅ Description generated: {description[:80]}...")
-                else:
-                    print("    ⚠️  Using fallback description")
-            except Exception as desc_error:
-                print(f"    ⚠️  Description generation failed: {desc_error}")
-                description = description_generator.generate_fallback_description(processed_doc)
-            
             # Create individual knowledge graph for this directory collection
             print("    🧠 Creating knowledge graph...")
             doc_kg, library_doc_id = await knowledge_graph.create_document_graph(processed_doc)
             print(f"    ✅ Knowledge graph created: {processed_doc.id[:8]}")
             
-            # Update library with description
-            if library_doc_id and description:
+            # Generate AI description from knowledge graph
+            print("    📄 Generating description from knowledge graph...")
+            try:
+                description = await doc_kg.generate_description()
+                if description:
+                    print(f"    ✅ Description generated: {description[:80]}...")
+                else:
+                    print("    ⚠️  Using fallback description")
+                    description = f"Directory collection containing {processed_doc.metadata.get('file_count', 0)} files."
+            except Exception as desc_error:
+                print(f"    ⚠️  Description generation failed: {desc_error}")
+                description = f"Directory collection containing {processed_doc.metadata.get('file_count', 0)} files."
+            
+            # Generate tags from knowledge graph
+            print("    🏷️  Generating tags from knowledge graph...")
+            try:
+                tags = await doc_kg.generate_tags()
+                if tags:
+                    print(f"    ✅ Tags generated: {', '.join(tags[:3])}{'...' if len(tags) > 3 else ''}")
+                else:
+                    print("    ⚠️  Using fallback tags")
+                    tags = ["directory", "collection"]
+            except Exception as tags_error:
+                print(f"    ⚠️  Tags generation failed: {tags_error}")
+                tags = ["directory", "collection"]
+            
+            # Update library with description and tags
+            if library_doc_id:
                 try:
-                    library_manager.update_document_metadata(library_doc_id, {"description": description})
-                    print(f"    📝 Description saved to library")
+                    metadata_update = {}
+                    if description:
+                        metadata_update["description"] = description
+                    if tags:
+                        metadata_update["tags"] = tags
+                    
+                    if metadata_update:
+                        library_manager.update_document_metadata(library_doc_id, metadata_update)
+                        print("    📝 Description and tags saved to library")
                 except Exception as e:
-                    print(f"    ⚠️  Failed to save description: {e}")
+                    print(f"    ⚠️  Failed to save metadata: {e}")
             
             # Generate mindmap
             print("    🗺️  Generating mindmap visualization...")
@@ -91,7 +112,6 @@ async def process_documents():
     processor = DocumentProcessor(config, library_manager)  # Pass shared library manager
     knowledge_graph = KnowledgeGraph(config, library_manager)  # Pass shared library manager
     mindmap_generator = MindmapGenerator(config, library_manager)  # Pass shared library manager
-    description_generator = DocumentDescriptionGenerator(config)  # Add description generator
     
     print("📚 Library Status:")
     stats = library_manager.get_library_stats()
@@ -169,31 +189,52 @@ async def process_documents():
             if processed_doc:
                 print(f"    📝 Text extracted: {len(processed_doc.text_content):,} characters")
                 
-                # Generate AI description
-                print("    📄 Generating AI description...")
-                try:
-                    description = await description_generator.generate_description(processed_doc)
-                    if description:
-                        print(f"    ✅ Description generated: {description[:80]}...")
-                    else:
-                        print("    ⚠️  Using fallback description")
-                except Exception as desc_error:
-                    print(f"    ⚠️  Description generation failed: {desc_error}")
-                    description = description_generator.generate_fallback_description(processed_doc)
-                
                 # Create individual knowledge graph for this document
                 print("    🧠 Creating knowledge graph...")
                 doc_kg, library_doc_id = await knowledge_graph.create_document_graph(processed_doc)
                 document_graphs[processed_doc.id] = doc_kg
                 print(f"    ✅ Knowledge graph created: {processed_doc.id[:8]}")
                 
-                # Update library with description
-                if library_doc_id and description:
+                # Generate AI description from knowledge graph
+                print("    📄 Generating description from knowledge graph...")
+                try:
+                    description = await doc_kg.generate_description()
+                    if description:
+                        print(f"    ✅ Description generated: {description[:80]}...")
+                    else:
+                        print("    ⚠️  Using fallback description")
+                        description = f"Document processed: {file_path.name}"
+                except Exception as desc_error:
+                    print(f"    ⚠️  Description generation failed: {desc_error}")
+                    description = f"Document processed: {file_path.name}"
+                
+                # Generate tags from knowledge graph
+                print("    🏷️  Generating tags from knowledge graph...")
+                try:
+                    tags = await doc_kg.generate_tags()
+                    if tags:
+                        print(f"    ✅ Tags generated: {', '.join(tags[:3])}{'...' if len(tags) > 3 else ''}")
+                    else:
+                        print("    ⚠️  Using fallback tags")
+                        tags = ["document"]
+                except Exception as tags_error:
+                    print(f"    ⚠️  Tags generation failed: {tags_error}")
+                    tags = ["document"]
+                
+                # Update library with description and tags
+                if library_doc_id:
                     try:
-                        library_manager.update_document_metadata(library_doc_id, {"description": description})
-                        print("    📝 Description saved to library")
+                        metadata_update = {}
+                        if description:
+                            metadata_update["description"] = description
+                        if tags:
+                            metadata_update["tags"] = tags
+                        
+                        if metadata_update:
+                            library_manager.update_document_metadata(library_doc_id, metadata_update)
+                            print("    📝 Description and tags saved to library")
                     except Exception as e:
-                        print(f"    ⚠️  Failed to save description: {e}")
+                        print(f"    ⚠️  Failed to save metadata: {e}")
                 
                 # Generate mindmap
                 print("    🗺️  Generating mindmap visualization...")
@@ -213,7 +254,7 @@ async def process_documents():
     # Process directories as collections
     for dir_path in dirs_to_process:
         doc_kg = await process_directory_collection(
-            processor, knowledge_graph, mindmap_generator, description_generator, library_manager, dir_path
+            processor, knowledge_graph, mindmap_generator, library_manager, dir_path
         )
         if doc_kg:
             document_graphs[f"dir_{dir_path.name}"] = doc_kg

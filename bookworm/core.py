@@ -589,6 +589,146 @@ class DocumentKnowledgeGraph:
         except Exception as e:
             self.logger.error(f"Query failed on document KG {self.document_id[:8]}: {e}")
             raise
+    
+    async def generate_description(self) -> str:
+        """Generate a description of the document by querying its knowledge graph"""
+        if not self.is_initialized:
+            await self.initialize()
+        
+        try:
+            # Query the knowledge graph to understand the document's content
+            description_query = """What is this document about? Provide a concise summary (2-3 sentences) that includes:
+1. The main topic or subject matter
+2. The type of content (technical, academic, business, etc.)
+3. Key themes or areas covered
+
+Be specific and informative."""
+            
+            self.logger.info(f"Generating description for document {self.document_id[:8]} from knowledge graph...")
+            
+            # Use hybrid mode for best results combining local and global knowledge
+            description = await self.query(description_query, mode="hybrid")
+            
+            if description and description.strip():
+                # Clean up the description
+                description = description.strip()
+                
+                # Remove any common prefixes the model might add
+                prefixes_to_remove = [
+                    "this document is about",
+                    "this document discusses",
+                    "the document covers",
+                    "this text is about",
+                    "the content focuses on",
+                    "based on the content",
+                    "according to the document"
+                ]
+                
+                description_lower = description.lower()
+                for prefix in prefixes_to_remove:
+                    if description_lower.startswith(prefix):
+                        description = description[len(prefix):].strip()
+                        # Capitalize first letter after removing prefix
+                        if description:
+                            description = description[0].upper() + description[1:]
+                        break
+                
+                self.logger.info(f"📝 Generated description from KG for document {self.document_id[:8]}: {description[:80]}...")
+                return description
+            else:
+                # Fallback to a simple description
+                fallback = f"Document processed and indexed in knowledge graph {self.document_id[:8]}."
+                self.logger.warning(f"Empty description from KG, using fallback: {fallback}")
+                return fallback
+                
+        except Exception as e:
+            self.logger.error(f"Failed to generate description from KG for document {self.document_id[:8]}: {e}")
+            # Return a basic fallback description
+            return f"Document indexed in knowledge graph {self.document_id[:8]} with content analysis available for querying."
+    
+    async def generate_tags(self, max_tags: int = 8) -> list[str]:
+        """Generate relevant tags for the document by querying its knowledge graph"""
+        if not self.is_initialized:
+            await self.initialize()
+        
+        try:
+            # Query the knowledge graph to extract key topics and concepts for tags
+            tags_query = f"""Based on the content in this document, extract {max_tags} relevant tags or keywords that best categorize and describe the document. 
+
+Focus on:
+1. Main topics and subject areas
+2. Key concepts and terminology
+3. Methodologies or approaches mentioned
+4. Application domains or industries
+5. Technical terms and processes
+
+Provide ONLY a simple comma-separated list of tags (no explanations, no numbers, no bullets).
+Examples: "machine learning, neural networks, data science, artificial intelligence, deep learning"
+
+Make the tags specific and useful for categorization."""
+            
+            self.logger.info(f"Generating tags for document {self.document_id[:8]} from knowledge graph...")
+            
+            # Use hybrid mode for best results
+            tags_response = await self.query(tags_query, mode="hybrid")
+            
+            if tags_response and tags_response.strip():
+                # Clean up the response and extract tags
+                tags_text = tags_response.strip()
+                
+                # Remove common prefixes that the AI might add
+                prefixes_to_remove = [
+                    "based on the document",
+                    "the main tags are:",
+                    "relevant tags:",
+                    "keywords:",
+                    "tags:",
+                    "here are the tags:",
+                    "the following tags"
+                ]
+                
+                tags_lower = tags_text.lower()
+                for prefix in prefixes_to_remove:
+                    if tags_lower.startswith(prefix):
+                        tags_text = tags_text[len(prefix):].strip()
+                        if tags_text.startswith(":"):
+                            tags_text = tags_text[1:].strip()
+                        break
+                
+                # Split by comma and clean up each tag
+                raw_tags = [tag.strip() for tag in tags_text.split(',')]
+                
+                # Clean and validate tags
+                clean_tags = []
+                for tag in raw_tags:
+                    # Remove quotes, periods, and other unwanted characters
+                    tag = tag.strip('"\'.,;:!?()[]{}').strip()
+                    
+                    # Skip empty tags, very short tags, or tags that are too long
+                    if tag and 2 <= len(tag) <= 30:
+                        # Convert to lowercase for consistency
+                        tag = tag.lower()
+                        
+                        # Skip duplicates
+                        if tag not in clean_tags:
+                            clean_tags.append(tag)
+                    
+                    # Stop if we have enough tags
+                    if len(clean_tags) >= max_tags:
+                        break
+                
+                self.logger.info(f"🏷️  Generated {len(clean_tags)} tags from KG for document {self.document_id[:8]}: {clean_tags[:3]}...")
+                return clean_tags
+            else:
+                # Fallback to basic tags based on document type
+                fallback_tags = ["document", "processed"]
+                self.logger.warning(f"Empty tags response from KG, using fallback: {fallback_tags}")
+                return fallback_tags
+                
+        except Exception as e:
+            self.logger.error(f"Failed to generate tags from KG for document {self.document_id[:8]}: {e}")
+            # Return basic fallback tags
+            return ["document", "processed"]
 
 
 class KnowledgeGraph:

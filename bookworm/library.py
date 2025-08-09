@@ -452,6 +452,7 @@ class LibraryManager:
             'knowledge_graph_path': 'knowledge_graph_id',  # Map path to id for storage
             'title': 'title',
             'author': 'author',
+            'description': 'description',  # Add description field
             'word_count': 'word_count',
             'processed_file_path': 'processed_file_path',
             'knowledge_graph_id': 'knowledge_graph_id'
