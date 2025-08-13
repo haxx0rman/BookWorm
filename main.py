@@ -5,13 +5,20 @@ BookWorm Document Processing System
 Each document creates its own knowledge graph for better isolation and scalability.
 No hardcoded sample data - processes real documents only.
 Now supports directory processing for Obsidian vaults and document collections.
+
+Updated to use the new modular architecture:
+- processors: DocumentProcessor
+- knowledge: KnowledgeGraph  
+- generators: MindmapGenerator
 """
 import asyncio
 import logging
 from pathlib import Path
 
 from bookworm.utils import BookWormConfig, load_config, setup_logging
-from bookworm.core import DocumentProcessor, KnowledgeGraph, MindmapGenerator
+from bookworm.processors import DocumentProcessor
+from bookworm.knowledge import KnowledgeGraph
+from bookworm.generators import MindmapGenerator
 from bookworm.library import LibraryManager, DocumentStatus, DocumentType
 
 

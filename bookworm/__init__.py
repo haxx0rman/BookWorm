@@ -1,19 +1,50 @@
 """
-BookWorm - Advanced Document/Knowledge Ingestion System
-Integrating LightRAG with Mindmap Generation for comprehensive document processing
+BookWorm: Advanced Document/Knowledge Ingestion System
+
+Refactored modular architecture with focused responsibilities:
+- models: Data models and schemas
+- processors: Document processing and description generation
+- knowledge: Knowledge graph management
+- generators: Content generation (mindmaps, etc.)
+- library: Document library management
+- utils: Configuration and utilities
 """
 
 __version__ = "0.1.0"
 __author__ = "BookWorm Team"
 __description__ = "Advanced document/knowledge ingestion system with LightRAG and mindmap generation"
 
-from .core import DocumentProcessor, KnowledgeGraph, MindmapGenerator
-from .utils import setup_logging, load_config
+from .models import ProcessedDocument, MindmapResult
+from .processors import DocumentProcessor, DocumentDescriptionGenerator
+from .knowledge import DocumentKnowledgeGraph, KnowledgeGraph
+from .generators import MindmapGenerator
+from .library import LibraryManager, DocumentStatus, DocumentType
+from .utils import BookWormConfig, load_config, setup_logging
 
+# Maintain backward compatibility - these are the main classes users need
 __all__ = [
-    "DocumentProcessor",
-    "KnowledgeGraph", 
-    "MindmapGenerator",
-    "setup_logging",
-    "load_config",
+    # Core models
+    'ProcessedDocument',
+    'MindmapResult', 
+    
+    # Processing components
+    'DocumentProcessor',
+    'DocumentDescriptionGenerator',
+    
+    # Knowledge graph components
+    'DocumentKnowledgeGraph',
+    'KnowledgeGraph',
+    
+    # Generation components
+    'MindmapGenerator',
+    
+    # Library management
+    'LibraryManager',
+    'DocumentStatus',
+    'DocumentType',
+    
+    # Configuration
+    'BookWormConfig',
+    'load_config',
+    'setup_logging'
 ]

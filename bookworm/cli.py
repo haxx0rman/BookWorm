@@ -7,7 +7,9 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-from .core import DocumentProcessor, KnowledgeGraph, MindmapGenerator
+from .processors import DocumentProcessor
+from .knowledge import KnowledgeGraph
+from .generators import MindmapGenerator
 from .utils import load_config, setup_logging, ensure_directories
 
 

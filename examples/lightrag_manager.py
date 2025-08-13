@@ -140,15 +140,10 @@ class LightRAGManager:
             working_dir=self.working_dir,
             llm_model_func=ollama_model_complete,
             llm_model_name=self.llm_model,
-            # Token limits for large document processing
-            max_entity_tokens=50000,      # Increased from 10000
-            max_relation_tokens=50000,    # Increased from 10000 
-            max_total_tokens=150000,      # Increased from 30000
-            chunk_token_size=16384,       # Increased from 8192
-            summary_max_tokens=8000,      # Increased from 4000
+            llm_model_max_token_size=18192,
             llm_model_kwargs={
                 "host": self.llm_host,
-                "options": {"num_ctx": 32768, "num_threads": 11},  # Increased context window
+                "options": {"num_ctx": 18192, "num_threads": 11},
                 "timeout": self.timeout,
             },
             embedding_func=EmbeddingFunc(

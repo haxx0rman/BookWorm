@@ -119,14 +119,14 @@ class AdvancedMindmapGenerator:
         # Initialize LLM clients
         self._init_llm_clients()
         
-        # Enhanced configuration
-        self.max_topics = 6
-        self.max_subtopics_per_topic = 4
-        self.max_details_per_subtopic = 8
+        # Enhanced configuration - unlimited topic extraction
+        self.max_topics = float('inf')  # No limit on topics
+        self.max_subtopics_per_topic = float('inf')  # No limit on subtopics per topic
+        self.max_details_per_subtopic = float('inf')  # No limit on details per subtopic
         self.similarity_threshold = {
-            'topic': 75,
-            'subtopic': 70,
-            'detail': 65
+            'topic': 85,       # Increased threshold - only reject if very similar
+            'subtopic': 80,    # Increased threshold
+            'detail': 75       # Increased threshold
         }
         
         # Token tracking
@@ -136,11 +136,9 @@ class AdvancedMindmapGenerator:
         # Caching and deduplication
         self._content_cache = {}
         self._emoji_cache = {}
-        self._unique_concepts = {
-            'topics': set(),
-            'subtopics': set(),
-            'details': set()
-        }
+        
+        # Initialize per-chunk concepts tracking (reset for each chunk)
+        self._reset_chunk_concepts()
         
         # LLM call counters
         self._llm_calls = {
@@ -148,14 +146,6 @@ class AdvancedMindmapGenerator:
             'subtopics': 0,
             'details': 0,
             'verification': 0
-        }
-        
-        # Max LLM call limits
-        self._max_llm_calls = {
-            'topics': 15,
-            'subtopics': 25,
-            'details': 35,
-            'verification': 10
         }
         
         # Initialize prompts
@@ -271,7 +261,7 @@ Example: ["Easy to use", "Flexible configuration", "Good performance"]"""
                 self.logger.info(f"📚 Document is large ({len(text_content.split()):,} words), using chunked processing")
                 mindmap_result = await self._generate_chunked_mindmap(text_content, doc_type, document_id)
             else:
-                self.logger.info(f"📄 Document size manageable, using standard processing")
+                self.logger.info("📄 Document size manageable, using standard processing")
                 mindmap_result = await self._generate_enhanced_mindmap(text_content, doc_type, document_id)
             
             # Generate outputs
@@ -317,9 +307,9 @@ Example: ["Easy to use", "Flexible configuration", "Good performance"]"""
         
         needs_chunking = word_count > MAX_WORDS or char_count > MAX_CHARS
         if needs_chunking:
-            self.logger.info(f"📄 Document exceeds thresholds, will use chunking")
+            self.logger.info("📄 Document exceeds thresholds, will use chunking")
         else:
-            self.logger.info(f"📄 Document size manageable, using standard processing")
+            self.logger.info("📄 Document size manageable, using standard processing")
         
         return needs_chunking
     
@@ -363,12 +353,27 @@ Example: ["Easy to use", "Flexible configuration", "Good performance"]"""
         self.logger.info(f"📊 Created {len(chunks)} chunks with {overlap} word overlap")
         return chunks
     
+    def _reset_chunk_concepts(self):
+        """Reset concept tracking for each chunk to avoid over-aggressive deduplication"""
+        self._unique_concepts = {
+            'topics': set(),
+            'subtopics': set(),
+            'details': set()
+        }
+
     async def _generate_chunked_mindmap(self, text_content: str, doc_type: DocumentType, document_id: str) -> str:
         """Generate mindmap from large document using chunking approach"""
         try:
             # Create chunks
             chunks = self._create_chunks(text_content)
-            self.logger.info(f"🔄 Processing {len(chunks)} chunks for document {document_id}")
+            
+            # Allow limiting chunks for testing  
+            chunk_limit = int(os.getenv('BOOKWORM_CHUNK_LIMIT', '0'))
+            if chunk_limit > 0:
+                chunks = chunks[:chunk_limit]
+                self.logger.info(f"🔄 Processing {len(chunks)} chunks (limited for testing) for document {document_id}")
+            else:
+                self.logger.info(f"🔄 Processing {len(chunks)} chunks for document {document_id}")
             
             # Generate partial mindmaps for each chunk
             chunk_mindmaps = []
@@ -378,6 +383,9 @@ Example: ["Easy to use", "Flexible configuration", "Good performance"]"""
                 self.logger.info(f"📝 Processing chunk {i+1}/{len(chunks)} ({chunk['word_count']} words)")
                 
                 try:
+                    # Reset concept tracking for each chunk to avoid over-aggressive deduplication
+                    self._reset_chunk_concepts()
+                    
                     # Generate mindmap for this chunk
                     chunk_result = await self._generate_enhanced_mindmap(chunk["text"], doc_type, f"{document_id}_chunk_{i}")
                     chunk_mindmaps.append({
@@ -386,16 +394,35 @@ Example: ["Easy to use", "Flexible configuration", "Good performance"]"""
                         "word_count": chunk["word_count"]
                     })
                     
-                    # Extract topics from this chunk for merging
-                    chunk_topics_data = await self._extract_topics_enhanced(chunk["text"], doc_type)
-                    # Convert to the format expected by _merge_chunk_topics
-                    for topic in chunk_topics_data:
-                        chunk_topics.append({
-                            'name': topic.get('name', ''),
-                            'description': f"Topic from chunk {i+1}",
-                            'categories': [doc_type.value],
-                            'importance': 'medium'
-                        })
+                    # Extract topics from the generated mindmap content
+                    mindmap_lines = chunk_result.split('\n')
+                    topics_found = 0
+                    for line in mindmap_lines:
+                        line = line.strip()
+                        # Look for topic lines with double parentheses and emoji indicators
+                        if '((' in line and '))' in line and ('📋' in line or '🎯' in line or '💼' in line or '📊' in line):
+                            # Extract topic name from mindmap syntax - remove ((📋 and ))
+                            topic_match = line
+                            if topic_match and topic_match != 'mindmap' and '📄' not in topic_match:
+                                # Clean up the topic name - remove parentheses and emoji
+                                import re
+                                # Extract text between (( and ))
+                                match = re.search(r'\(\(([^)]+)\)\)', topic_match)
+                                if match:
+                                    topic_name = match.group(1).strip()
+                                    # Remove emoji and extra spaces
+                                    topic_name = re.sub(r'[📋🎯💼📊⚙️💡🔍📈]', '', topic_name).strip()
+                                    if topic_name and topic_name not in [t['name'] for t in chunk_topics]:
+                                        chunk_topics.append({
+                                            'name': topic_name,
+                                            'description': f"Topic from chunk {i+1}",
+                                            'categories': [doc_type.value],
+                                            'importance': 'medium'
+                                        })
+                                        topics_found += 1
+                                        self.logger.info(f"  📌 Added topic from mindmap: {topic_name}")
+                    
+                    self.logger.info(f"🔍 Extracted {topics_found} topics from chunk {i+1} mindmap")
                     
                 except Exception as e:
                     self.logger.warning(f"⚠️ Failed to process chunk {i+1}: {e}")
@@ -418,21 +445,24 @@ Example: ["Easy to use", "Flexible configuration", "Good performance"]"""
             return await self._generate_enhanced_mindmap(truncated_content, doc_type, document_id)
     
     def _merge_chunk_topics(self, chunk_topics: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Merge and deduplicate topics from multiple chunks"""
+        """Merge and deduplicate topics from multiple chunks with improved logic"""
         merged_topics = {}
         
         for topic in chunk_topics:
-            topic_name = topic.get('name', '').strip().lower()
+            topic_name = topic.get('name', '').strip()
             
             if not topic_name:
                 continue
             
-            # Use fuzzy matching to detect similar topics
+            topic_name_lower = topic_name.lower()
+            
+            # Use fuzzy matching to detect similar topics with more conservative threshold
             similar_key = None
             if fuzz:
                 for existing_key in merged_topics.keys():
-                    similarity = fuzz.ratio(topic_name, existing_key)
-                    if similarity > 80:  # 80% similarity threshold
+                    similarity = fuzz.ratio(topic_name_lower, existing_key.lower())
+                    # Only merge if very similar (90%+) to preserve distinct topics
+                    if similarity > 90:
                         similar_key = existing_key
                         break
             
@@ -453,9 +483,9 @@ Example: ["Easy to use", "Flexible configuration", "Good performance"]"""
                 existing_topic['frequency'] = existing_topic.get('frequency', 1) + 1
                 
             else:
-                # Add as new topic
+                # Add as new topic with original name (preserve capitalization)
                 merged_topics[topic_name] = {
-                    'name': topic.get('name', topic_name),
+                    'name': topic_name,
                     'description': topic.get('description', ''),
                     'categories': topic.get('categories', []),
                     'frequency': 1,
@@ -469,7 +499,7 @@ Example: ["Easy to use", "Flexible configuration", "Good performance"]"""
             reverse=True
         )
         
-        return sorted_topics[:15]  # Limit to top 15 topics
+        return sorted_topics  # Return all topics (no limit)
     
     async def _create_unified_mindmap(self, merged_topics: List[Dict[str, Any]], full_text: str, doc_type: DocumentType) -> str:
         """Create a unified mindmap from merged topics"""
@@ -507,7 +537,7 @@ Example: ["Easy to use", "Flexible configuration", "Good performance"]"""
         lines = ["graph TD"]
         lines.append("    Root[📄 Document Mindmap]")
         
-        for i, topic in enumerate(topics[:10]):  # Limit to top 10
+        for i, topic in enumerate(topics):  # Process all topics (no limit)
             topic_id = f"T{i+1}"
             topic_name = topic.get('name', f'Topic {i+1}')
             lines.append(f"    Root --> {topic_id}[{topic_name}]")
@@ -561,10 +591,6 @@ Example: ["Easy to use", "Flexible configuration", "Good performance"]"""
     
     async def _extract_topics_enhanced(self, text_content: str, doc_type: DocumentType) -> List[Dict[str, Any]]:
         """Extract topics with enhanced semantic deduplication"""
-        if self._llm_calls['topics'] >= self._max_llm_calls['topics']:
-            self.logger.warning("🚫 Maximum topic extraction calls reached")
-            return []
-        
         prompt = self.type_prompts[doc_type]['topics']
         
         # Truncate content if too long
@@ -579,7 +605,8 @@ Example: ["Easy to use", "Flexible configuration", "Good performance"]"""
         
         # Convert to structured format with semantic deduplication
         topics = []
-        for topic_name in topics_data[:self.max_topics]:
+        max_topics_to_process = len(topics_data) if self.max_topics == float('inf') else self.max_topics
+        for topic_name in topics_data[:max_topics_to_process]:
             if isinstance(topic_name, str) and topic_name.strip():
                 # Check for semantic similarity with existing topics
                 is_unique = await self._is_semantically_unique(topic_name, self._unique_concepts['topics'], 'topic')
@@ -598,39 +625,36 @@ Example: ["Easy to use", "Flexible configuration", "Good performance"]"""
         topic_name = topic['name']
         
         # Extract subtopics with deduplication
-        if self._llm_calls['subtopics'] < self._max_llm_calls['subtopics']:
-            subtopics_prompt = self.type_prompts[doc_type]['subtopics'].format(topic=topic_name)
-            full_prompt = f"{subtopics_prompt}\n\nDocument content:\n{text_content[:3000]}"
-            
-            subtopics_response = await self._call_llm_enhanced(full_prompt, "subtopics")
-            subtopics_data = self._parse_json_response(subtopics_response)
-            
-            # Process subtopics with semantic deduplication
-            processed_subtopics = []
-            for subtopic_name in subtopics_data[:self.max_subtopics_per_topic]:
-                if isinstance(subtopic_name, str) and subtopic_name.strip():
-                    # Check uniqueness
-                    is_unique = await self._is_semantically_unique(subtopic_name, self._unique_concepts['subtopics'], 'subtopic')
-                    if is_unique:
-                        # Extract details
-                        details = await self._extract_details_enhanced(subtopic_name, text_content, doc_type)
-                        
-                        processed_subtopics.append({
-                            'name': subtopic_name.strip(),
-                            'emoji': await self._select_emoji_enhanced(subtopic_name),
-                            'details': details
-                        })
-                        self._unique_concepts['subtopics'].add(subtopic_name.strip())
-            
-            topic['subtopics'] = processed_subtopics
+        subtopics_prompt = self.type_prompts[doc_type]['subtopics'].format(topic=topic_name)
+        full_prompt = f"{subtopics_prompt}\n\nDocument content:\n{text_content[:3000]}"
+        
+        subtopics_response = await self._call_llm_enhanced(full_prompt, "subtopics")
+        subtopics_data = self._parse_json_response(subtopics_response)
+        
+        # Process subtopics with semantic deduplication
+        processed_subtopics = []
+        max_subtopics_to_process = len(subtopics_data) if self.max_subtopics_per_topic == float('inf') else self.max_subtopics_per_topic
+        for subtopic_name in subtopics_data[:max_subtopics_to_process]:
+            if isinstance(subtopic_name, str) and subtopic_name.strip():
+                # Check uniqueness
+                is_unique = await self._is_semantically_unique(subtopic_name, self._unique_concepts['subtopics'], 'subtopic')
+                if is_unique:
+                    # Extract details
+                    details = await self._extract_details_enhanced(subtopic_name, text_content, doc_type)
+                    
+                    processed_subtopics.append({
+                        'name': subtopic_name.strip(),
+                        'emoji': await self._select_emoji_enhanced(subtopic_name),
+                        'details': details
+                    })
+                    self._unique_concepts['subtopics'].add(subtopic_name.strip())
+        
+        topic['subtopics'] = processed_subtopics
         
         return topic
     
     async def _extract_details_enhanced(self, subtopic_name: str, text_content: str, doc_type: DocumentType) -> List[Dict[str, Any]]:
         """Extract details with enhanced processing"""
-        if self._llm_calls['details'] >= self._max_llm_calls['details']:
-            return []
-        
         details_prompt = self.type_prompts[doc_type]['details'].format(subtopic=subtopic_name)
         full_prompt = f"{details_prompt}\n\nDocument content:\n{text_content[:2000]}"
         
@@ -639,7 +663,8 @@ Example: ["Easy to use", "Flexible configuration", "Good performance"]"""
         
         # Process details with deduplication
         processed_details = []
-        for detail in details_data[:self.max_details_per_subtopic]:
+        max_details_to_process = len(details_data) if self.max_details_per_subtopic == float('inf') else self.max_details_per_subtopic
+        for detail in details_data[:max_details_to_process]:
             if isinstance(detail, str) and detail.strip():
                 # Check uniqueness
                 is_unique = await self._is_semantically_unique(detail, self._unique_concepts['details'], 'detail')
@@ -678,10 +703,6 @@ Example: ["Easy to use", "Flexible configuration", "Good performance"]"""
     
     async def _verify_mindmap_against_source(self, concepts: Dict[str, Any], document_content: str) -> Dict[str, Any]:
         """Verify mindmap content against source document"""
-        if self._llm_calls['verification'] >= self._max_llm_calls['verification']:
-            self.logger.warning("🚫 Skipping verification due to LLM call limits")
-            return concepts
-        
         self.logger.info("🔍 Performing reality check against source document...")
         
         # For now, return concepts as-is (full verification would require more LLM calls)
@@ -788,12 +809,14 @@ Example: ["Easy to use", "Flexible configuration", "Good performance"]"""
             output_tokens = 0
             
             if self.config.api_provider == "OLLAMA" and self.ollama_client:
+                self.logger.debug(f"Making OLLAMA call for category: {category}")
                 response = await self.ollama_client.chat.completions.create(
                     model=self.config.llm_model,
                     messages=[{"role": "user", "content": prompt}],
                     max_tokens=self.config.max_tokens,
                     temperature=self.config.temperature
                 )
+                self.logger.debug(f"OLLAMA response received for category: {category}")
                 
                 if response.usage:
                     input_tokens = response.usage.prompt_tokens or 0
@@ -813,7 +836,9 @@ Example: ["Easy to use", "Flexible configuration", "Good performance"]"""
             return response_text
                 
         except Exception as e:
-            self.logger.error(f"OLLAMA LLM call failed: {e}")
+            self.logger.error(f"OLLAMA LLM call failed for category '{category}': {e}")
+            self.logger.error(f"Exception type: {type(e).__name__}")
+            self.logger.error(f"Prompt was: {prompt[:100]}...")
             return self._generate_fallback_response(category)
     
     async def _detect_document_type(self, text_content: str) -> DocumentType:
@@ -888,7 +913,7 @@ Example: ["Easy to use", "Flexible configuration", "Good performance"]"""
                     if line:
                         items.append(line)
             
-            return items[:10]  # Limit results
+            return items  # Return all items (no limit)
     
     def _generate_enhanced_html(self, mermaid_syntax: str) -> str:
         """Generate enhanced HTML with better styling"""

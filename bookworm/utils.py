@@ -8,7 +8,7 @@ from typing import Dict, Optional, Union
 from dataclasses import dataclass
 
 try:
-    from dotenv import load_dotenv
+    from dotenv import load_dotenv  # type: ignore[assignment]
 except ImportError:
     def load_dotenv(dotenv_path=None):
         """Fallback if python-dotenv is not available"""
@@ -43,7 +43,7 @@ class BookWormConfig:
     # Directory Settings (following user's lightrag_ex.py structure)
     working_dir: str = "./bookworm_workspace"  # BookWorm working directory
     document_dir: str = "./bookworm_workspace/docs"
-    processed_dir: str = "./bookworm_workspace/processed_docs"  # Following user's DOCUMENT_ARCHIVE_DIR
+    processed_dir: str = "./bookworm_workspace/processed_docs"  # Align with examples
     output_dir: str = "./bookworm_workspace/output"
     
     # PDF Processing (following user's preference for mineru)
@@ -76,17 +76,23 @@ def load_config(env_file: Optional[str] = None) -> BookWormConfig:
     config.anthropic_api_key = os.getenv("ANTHROPIC_API_KEY", "")
     config.deepseek_api_key = os.getenv("DEEPSEEK_API_KEY", "")
     config.gemini_api_key = os.getenv("GEMINI_API_KEY", "")
-    config.api_provider = os.getenv("API_PROVIDER", "OPENAI")
+    config.api_provider = os.getenv("BOOKWORM_API_PROVIDER", os.getenv("API_PROVIDER", "OPENAI")).upper()
     
-    # Load LightRAG settings
-    config.llm_model = os.getenv("LLM_MODEL", "gpt-4o-mini")
-    config.embedding_model = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
-    config.llm_host = os.getenv("LLM_HOST", "http://localhost:11434")
-    config.embedding_host = os.getenv("EMBEDDING_HOST", "http://localhost:11434")
-    config.embedding_dim = int(os.getenv("EMBEDDING_DIM", "1536"))
-    config.max_embed_tokens = int(os.getenv("MAX_EMBED_TOKENS", "8192"))
-    config.timeout = int(os.getenv("TIMEOUT", "300"))
-    config.embedding_timeout = int(os.getenv("EMBEDDING_TIMEOUT", "600"))
+    # Load LightRAG settings (support both our vars and prototype vars)
+    # Choose sensible defaults based on provider
+    default_llm_model = "qwen2.5-coder:32b" if config.api_provider == "OLLAMA" else "gpt-4o-mini"
+    default_embed_model = "bge-m3:latest" if config.api_provider == "OLLAMA" else "text-embedding-3-small"
+    default_embed_dim = "1024" if config.api_provider == "OLLAMA" else "1536"
+    
+    config.llm_model = os.getenv("LLM_MODEL", default_llm_model)
+    config.embedding_model = os.getenv("EMBEDDING_MODEL", default_embed_model)
+    # Support both LLM_HOST and LLM_BINDING_HOST
+    config.llm_host = os.getenv("LLM_HOST", os.getenv("LLM_BINDING_HOST", "http://localhost:11434"))
+    config.embedding_host = os.getenv("EMBEDDING_HOST", os.getenv("EMBEDDING_BINDING_HOST", config.llm_host))
+    config.embedding_dim = int(os.getenv("EMBEDDING_DIM", os.getenv("EMBEDDING_DIMENSION", default_embed_dim)))
+    config.max_embed_tokens = int(os.getenv("MAX_EMBED_TOKENS", os.getenv("MAX_TOKEN_SIZE", "8192")))
+    config.timeout = int(os.getenv("TIMEOUT", "3000"))  # Increased timeout for large documents
+    config.embedding_timeout = int(os.getenv("EMBEDDING_TIMEOUT", "6000"))  # Increased embedding timeout
     
     # Load LLM generation settings
     config.temperature = float(os.getenv("TEMPERATURE", "0.7"))
@@ -94,12 +100,12 @@ def load_config(env_file: Optional[str] = None) -> BookWormConfig:
     
     # Load directory settings
     config.working_dir = os.getenv("WORKING_DIR", "./bookworm_workspace")
-    config.document_dir = os.getenv("DOCUMENT_DIR", "./bookworm_workspace/docs")
-    config.processed_dir = os.getenv("PROCESSED_DIR", "./bookworm_workspace/processed")
-    config.output_dir = os.getenv("OUTPUT_DIR", "./bookworm_workspace/output")
+    config.document_dir = os.getenv("DOCUMENT_DIR", f"{config.working_dir}/docs")
+    config.processed_dir = os.getenv("PROCESSED_DIR", f"{config.working_dir}/processed_docs")
+    config.output_dir = os.getenv("OUTPUT_DIR", f"{config.working_dir}/output")
     
     # Load PDF processing settings
-    config.pdf_processor = os.getenv("PDF_PROCESSOR", "pymupdf")
+    config.pdf_processor = os.getenv("PDF_PROCESSOR", "mineru")
     config.skip_pdf_conversion = os.getenv("SKIP_PDF_CONVERSION", "false").lower() == "true"
     
     # Load logging settings
