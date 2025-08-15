@@ -14,6 +14,11 @@ Updated to use the new modular architecture:
 import asyncio
 import logging
 from pathlib import Path
+import os
+import shutil
+import tempfile
+
+# PDF conversion imports will be loaded dynamically as needed
 
 from bookworm.utils import BookWormConfig, load_config, setup_logging
 from bookworm.processors import DocumentProcessor
@@ -21,10 +26,126 @@ from bookworm.knowledge import KnowledgeGraph
 from bookworm.generators import MindmapGenerator
 from bookworm.library import LibraryManager, DocumentStatus, DocumentType
 
+from dotenv import load_dotenv
+load_dotenv(dotenv_path=".env", override=False)
+
+import logging
+logging.basicConfig(level=logging.INFO)
+
+
+async def convert_and_archive_pdfs(config: BookWormConfig):
+    """
+    Convert all PDFs in the document directory to markdown using the configured processor,
+    and archive the original PDFs to the processed_docs directory.
+    """
+    docs_dir = Path(config.document_dir)
+    processed_dir = Path(config.processed_dir)
+    pdf_processor = config.pdf_processor.lower()
+    os.makedirs(docs_dir, exist_ok=True)
+    os.makedirs(processed_dir, exist_ok=True)
+
+    pdf_files = list(docs_dir.glob("*.pdf"))
+    if not pdf_files:
+        print("No PDF files found to convert.")
+        return
+
+    print(f"\n📄 Converting {len(pdf_files)} PDF files to Markdown using {pdf_processor.title()}...")
+    for i, pdf_path in enumerate(pdf_files, 1):
+        try:
+            print(f"[{i}/{len(pdf_files)}] Processing: {pdf_path.name}")
+            markdown_filename = pdf_path.stem + ".md"
+            markdown_path = docs_dir / markdown_filename
+            pdf_archive_path = processed_dir / pdf_path.name
+
+            # Skip if already converted and archived
+            if markdown_path.exists() and pdf_archive_path.exists():
+                print(f"✅ Already processed: {markdown_path} and archived PDF.")
+                continue
+
+            # Convert PDF to markdown
+            markdown_content = ""
+            if pdf_processor == "docling":
+                try:
+                    from docling.document_converter import DocumentConverter
+                    from docling.datamodel.base_models import InputFormat
+                    from docling.datamodel.pipeline_options import PdfPipelineOptions
+                    from docling.document_converter import PdfFormatOption
+                    print("Processing with Docling...")
+                    pipeline_options = PdfPipelineOptions()
+                    pipeline_options.do_ocr = True
+                    pipeline_options.do_table_structure = True
+                    pipeline_options.table_structure_options.do_cell_matching = True
+                    doc_converter = DocumentConverter(
+                        format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)}
+                    )
+                    result = doc_converter.convert(str(pdf_path))
+                    if result and result.document:
+                        markdown_content = result.document.export_to_markdown()
+                except ImportError as e:
+                    print(f"Docling not available: {e}. Falling back to MinerU...")
+                    pdf_processor = "mineru"  # fallback
+                except Exception as e:
+                    print(f"Error converting PDF with Docling: {e}")
+            if pdf_processor == "mineru" and not markdown_content:
+                try:
+                    from mineru.cli.common import prepare_env, read_fn
+                    from mineru.data.data_reader_writer import FileBasedDataWriter
+                    from mineru.utils.enum_class import MakeMode
+                    from mineru.backend.pipeline.pipeline_analyze import doc_analyze as pipeline_doc_analyze
+                    from mineru.backend.pipeline.pipeline_middle_json_mkcontent import union_make as pipeline_union_make
+                    from mineru.backend.pipeline.model_json_to_middle_json import result_to_middle_json as pipeline_result_to_middle_json
+                    import os as _os
+                    _os.environ["CUDA_VISIBLE_DEVICES"] = ""
+                    with tempfile.TemporaryDirectory() as temp_dir:
+                        pdf_file_name = pdf_path.stem
+                        local_image_dir, local_md_dir = prepare_env(temp_dir, pdf_file_name, "auto")
+                        pdf_bytes = read_fn(str(pdf_path))
+                        if not pdf_bytes:
+                            print(f"Failed to read PDF file: {pdf_path}")
+                        else:
+                            pdf_bytes_list = [pdf_bytes]
+                            p_lang_list = ["en"]
+                            print("Processing with CPU-only mode...")
+                            infer_results, all_image_lists, all_pdf_docs, lang_list, ocr_enabled_list = pipeline_doc_analyze(
+                                pdf_bytes_list, p_lang_list, parse_method="auto", formula_enable=True, table_enable=True
+                            )
+                            if infer_results:
+                                model_list = infer_results[0]
+                                images_list = all_image_lists[0]
+                                pdf_doc = all_pdf_docs[0]
+                                _lang = lang_list[0]
+                                _ocr_enable = ocr_enabled_list[0]
+                                image_writer = FileBasedDataWriter(local_image_dir)
+                                middle_json = pipeline_result_to_middle_json(
+                                    model_list, images_list, pdf_doc, image_writer, _lang, _ocr_enable, True
+                                )
+                                pdf_info = middle_json["pdf_info"]
+                                image_dir = str(os.path.basename(local_image_dir))
+                                markdown_content = pipeline_union_make(pdf_info, MakeMode.MM_MD, image_dir)
+                                if isinstance(markdown_content, list):
+                                    markdown_content = "\n".join(str(item) for item in markdown_content)
+                except ImportError as e:
+                    print(f"MinerU not available: {e}. Cannot convert PDF.")
+                except Exception as e:
+                    print(f"Error converting PDF with MinerU: {e}")
+            if markdown_content:
+                with open(markdown_path, 'w', encoding='utf-8') as f:
+                    f.write(markdown_content)
+                print(f"✅ Converted to: {markdown_path} ({len(markdown_content)} characters)")
+                try:
+                    shutil.move(str(pdf_path), str(pdf_archive_path))
+                    print(f"📦 Archived PDF: {pdf_archive_path}")
+                except Exception as move_error:
+                    print(f"⚠️  Warning: Could not archive PDF: {move_error}")
+            else:
+                print(f"❌ Failed to convert: {pdf_path}")
+        except Exception as e:
+            print(f"❌ Error converting {pdf_path}: {e}")
+
 
 async def process_directory_collection(processor, knowledge_graph, mindmap_generator, library_manager, directory_path):
     """Process an entire directory as a single document"""
-    print(f"📁 Processing directory collection: {directory_path.name}")
+    print(f"\ud83d\udcc1 Processing directory collection: {directory_path.name}")
     
     try:
         # Check if directory is already processed in library
@@ -113,6 +234,12 @@ async def process_documents():
     # Load configuration
     config = load_config()
     setup_logging(config)
+
+    # Step 1: Convert and archive PDFs before processing anything else
+    if not config.skip_pdf_conversion:
+        await convert_and_archive_pdfs(config)
+    else:
+        print("\n⏭️  Skipping PDF conversion (SKIP_PDF_CONVERSION=true)")
     
     # Create components with shared library manager
     library_manager = LibraryManager(config)
@@ -330,6 +457,63 @@ async def process_documents():
     print("  • Cross-document queries are supported")
     print("  • Mindmaps are generated per document")
 
+    # Interactive CLI for querying
+    print("\n🖥️  Entering interactive query mode. Type 'help' for options.")
+    while True:
+        try:
+            cmd = input("\nCommand (query/queryall/stats/list/exit/help): ").strip().lower()
+            if cmd in ("exit", "quit"): 
+                print("👋 Goodbye!")
+                break
+            elif cmd == "help":
+                print("\nAvailable commands:")
+                print("  query     - Query a specific document graph")
+                print("  queryall  - Query all document graphs (cross-document)")
+                print("  stats     - Show library/document stats")
+                print("  list      - List available document graph IDs")
+                print("  exit      - Exit interactive mode")
+            elif cmd == "list":
+                print("\nAvailable document graph IDs:")
+                for doc_id in kg_list:
+                    print(f"  - {doc_id}")
+            elif cmd == "stats":
+                stats = library_manager.get_library_stats()
+                print(f"\n📊 Documents: {stats.total_documents}, Processed: {stats.processed_documents}, Mindmaps: {stats.total_mindmaps}, Failed: {stats.failed_documents}")
+            elif cmd == "query":
+                doc_id = input("Enter document graph ID: ").strip()
+                if not doc_id:
+                    print("No document ID entered.")
+                    continue
+                query = input("Enter your question: ").strip()
+                if not query:
+                    print("No query entered.")
+                    continue
+                try:
+                    doc_kg = await knowledge_graph.get_document_graph(doc_id)
+                    if not doc_kg:
+                        print(f"No knowledge graph found for document ID: {doc_id}")
+                        continue
+                    answer = await doc_kg.query(query, mode="hybrid")
+                    print(f"\nA: {answer}")
+                except Exception as e:
+                    print(f"Error querying document graph: {e}")
+            elif cmd == "queryall":
+                query = input("Enter your question for all documents: ").strip()
+                if not query:
+                    print("No query entered.")
+                    continue
+                try:
+                    results = await knowledge_graph.query_all_documents(query, mode="global")
+                    for doc_id, answer in results.items():
+                        print(f"\n[Document {doc_id[:8]}]\n{answer}")
+                except Exception as e:
+                    print(f"Error in cross-document query: {e}")
+            else:
+                print("Unknown command. Type 'help' for options.")
+        except Exception as e:
+            print(f"Error in interactive CLI: {e}")
 
 if __name__ == "__main__":
+    import uvloop
+    asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
     asyncio.run(process_documents())

@@ -41,3 +41,4 @@ test_debug.py
 *_test.py
 debug_*
 logs/bookworm.log
+/raganything_workspace

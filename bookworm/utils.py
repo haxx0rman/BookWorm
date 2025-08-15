@@ -80,14 +80,14 @@ def load_config(env_file: Optional[str] = None) -> BookWormConfig:
     
     # Load LightRAG settings (support both our vars and prototype vars)
     # Choose sensible defaults based on provider
-    default_llm_model = "qwen2.5-coder:32b" if config.api_provider == "OLLAMA" else "gpt-4o-mini"
+    default_llm_model = "qwen3-coder:30b" if config.api_provider == "OLLAMA" else "gpt-4o-mini"
     default_embed_model = "bge-m3:latest" if config.api_provider == "OLLAMA" else "text-embedding-3-small"
-    default_embed_dim = "1024" if config.api_provider == "OLLAMA" else "1536"
+    default_embed_dim = "1024" 
     
     config.llm_model = os.getenv("LLM_MODEL", default_llm_model)
     config.embedding_model = os.getenv("EMBEDDING_MODEL", default_embed_model)
     # Support both LLM_HOST and LLM_BINDING_HOST
-    config.llm_host = os.getenv("LLM_HOST", os.getenv("LLM_BINDING_HOST", "http://localhost:11434"))
+    config.llm_host = os.getenv("LLM_HOST", os.getenv("LLM_BINDING_HOST", "http://brainmachine:11434"))
     config.embedding_host = os.getenv("EMBEDDING_HOST", os.getenv("EMBEDDING_BINDING_HOST", config.llm_host))
     config.embedding_dim = int(os.getenv("EMBEDDING_DIM", os.getenv("EMBEDDING_DIMENSION", default_embed_dim)))
     config.max_embed_tokens = int(os.getenv("MAX_EMBED_TOKENS", os.getenv("MAX_TOKEN_SIZE", "8192")))
@@ -95,8 +95,8 @@ def load_config(env_file: Optional[str] = None) -> BookWormConfig:
     config.embedding_timeout = int(os.getenv("EMBEDDING_TIMEOUT", "6000"))  # Increased embedding timeout
     
     # Load LLM generation settings
-    config.temperature = float(os.getenv("TEMPERATURE", "0.7"))
-    config.max_tokens = int(os.getenv("MAX_TOKENS", "2000"))
+    config.temperature = float(os.getenv("TEMPERATURE", "0.0"))
+    config.max_tokens = int(os.getenv("MAX_TOKENS", "20000"))
     
     # Load directory settings
     config.working_dir = os.getenv("WORKING_DIR", "./bookworm_workspace")
@@ -109,13 +109,13 @@ def load_config(env_file: Optional[str] = None) -> BookWormConfig:
     config.skip_pdf_conversion = os.getenv("SKIP_PDF_CONVERSION", "false").lower() == "true"
     
     # Load logging settings
-    config.log_level = os.getenv("LOG_LEVEL", "INFO")
+    config.log_level = "DEBUG"  # Force DEBUG for troubleshooting
     config.log_dir = os.getenv("LOG_DIR", "./logs")
     config.log_max_bytes = int(os.getenv("LOG_MAX_BYTES", "10485760"))
     config.log_backup_count = int(os.getenv("LOG_BACKUP_COUNT", "5"))
     
     # Load performance settings
-    config.max_concurrent_processes = int(os.getenv("MAX_CONCURRENT_PROCESSES", "4"))
+    config.max_concurrent_processes = 1  # Force single process for troubleshooting
     config.chunk_size = int(os.getenv("CHUNK_SIZE", "8192"))
     config.max_file_size_mb = int(os.getenv("MAX_FILE_SIZE_MB", "100"))
     
@@ -129,7 +129,6 @@ def setup_logging(config: BookWormConfig) -> logging.Logger:
     # Create log directory if it doesn't exist
     Path(config.log_dir).mkdir(parents=True, exist_ok=True)
     
-    # Configure logger
     logger = logging.getLogger("bookworm")
     logger.setLevel(getattr(logging, config.log_level.upper()))
     
@@ -137,9 +136,9 @@ def setup_logging(config: BookWormConfig) -> logging.Logger:
     for handler in logger.handlers[:]:
         logger.removeHandler(handler)
     
-    # Console handler
+    # Console handler (always enabled, DEBUG level for troubleshooting)
     console_handler = logging.StreamHandler()
-    console_handler.setLevel(getattr(logging, config.log_level.upper()))
+    console_handler.setLevel(logging.DEBUG)
     console_format = logging.Formatter(
         '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
@@ -160,6 +159,14 @@ def setup_logging(config: BookWormConfig) -> logging.Logger:
     file_handler.setFormatter(file_format)
     logger.addHandler(file_handler)
     
+    # --- Ensure lightrag logger is also configured ---
+    lightrag_logger = logging.getLogger("lightrag")
+    lightrag_logger.setLevel(logging.INFO)
+    # Remove all handlers to avoid duplicate logs
+    for handler in lightrag_logger.handlers[:]:
+        lightrag_logger.removeHandler(handler)
+    lightrag_logger.addHandler(console_handler)
+    lightrag_logger.addHandler(file_handler)
     return logger
 
 

@@ -57,20 +57,61 @@ class DocumentKnowledgeGraph:
             
         for attempt in range(max_retries):
             try:
-                self.logger.debug(f"Embedding attempt {attempt + 1} with model {self.config.embedding_model}")
-                return await ollama_embed(
+                self.logger.debug(f"Step: Embedding attempt {attempt + 1} with model {self.config.embedding_model} (texts: {len(texts)})")
+                result = await ollama_embed(
                     texts,
                     embed_model=self.config.embedding_model,
                     host=self.config.embedding_host,
                     timeout=self.config.embedding_timeout,
-                    options={"num_threads": 11}
+                    options={}
                 )
+                self.logger.debug(f"Step: Embedding successful on attempt {attempt + 1}")
+                return result
             except Exception as e:
                 if attempt == max_retries - 1:
                     self.logger.error(f"Embedding failed after {max_retries} attempts: {e}")
                     raise
                 
                 self.logger.warning(f"Embedding attempt {attempt + 1} failed: {e}")
+                self.logger.info(f"Retrying in {delay} seconds...")
+                await asyncio.sleep(delay)
+                delay *= 2  # Exponential backoff
+
+    async def _robust_ollama_complete(self, prompt: str, **kwargs) -> str:
+        """
+        Robust wrapper for ollama_model_complete with retry logic and error handling
+        Similar to _robust_ollama_embed but for LLM completion
+        
+        Args:
+            prompt (str): The prompt to send to the LLM
+            **kwargs: Additional arguments like model, host, etc.
+            
+        Returns:
+            str: The completed text from the LLM
+            
+        Raises:
+            Exception: If all retry attempts fail
+        """
+        if not ollama_model_complete:
+            raise ImportError("ollama_model_complete not available")
+            
+        max_retries = kwargs.pop('max_retries', 3)
+        delay = kwargs.pop('delay', 1.0)
+        
+        for attempt in range(max_retries):
+            try:
+                self.logger.debug(f"Step: LLM completion attempt {attempt + 1} with model {kwargs.get('model', 'unknown')}")
+                
+                # Pass all arguments directly to ollama_model_complete 
+                result = await ollama_model_complete(prompt=prompt, **kwargs)
+                self.logger.debug(f"Step: LLM completion successful on attempt {attempt + 1}")
+                return str(result)
+            except Exception as e:
+                if attempt == max_retries - 1:
+                    self.logger.error(f"LLM completion failed after {max_retries} attempts: {e}")
+                    raise
+                
+                self.logger.warning(f"LLM completion attempt {attempt + 1} failed: {e}")
                 self.logger.info(f"Retrying in {delay} seconds...")
                 await asyncio.sleep(delay)
                 delay *= 2  # Exponential backoff
@@ -88,8 +129,7 @@ class DocumentKnowledgeGraph:
             raise ImportError("Required LightRAG components not available")
 
         self.logger.info(f"Initializing document knowledge graph for {self.document_id[:8]}...")
-
-        # Debug configuration
+        self.logger.debug("Step: Configuration dump")
         self.logger.info("Configuration:")
         self.logger.info(f"  Working Directory: {self.doc_working_dir}")
         self.logger.info(f"  LLM Host: {self.config.llm_host}")
@@ -101,27 +141,23 @@ class DocumentKnowledgeGraph:
 
         # Enable verbose debug logging if available
         if set_verbose_debug:
+            self.logger.debug("Step: Enabling verbose debug for LightRAG")
             set_verbose_debug(True)
 
-        # Initialize RAG system with same settings as LightRAGManager
+        self.logger.debug("Step: Instantiating LightRAG")
         self.rag = LightRAG(
             working_dir=str(self.doc_working_dir),
-            llm_model_func=ollama_model_complete,
+            llm_model_func=self._robust_ollama_complete,
             llm_model_name=self.config.llm_model,
-            # Token limits for large document processing (from LightRAGManager)
-            max_entity_tokens=50000,      # Increased from 10000
-            max_relation_tokens=50000,    # Increased from 10000 
-            max_total_tokens=150000,      # Increased from 30000
-            chunk_token_size=16384,       # Increased from 8192
-            summary_max_tokens=8000,      # Increased from 4000
+            llm_model_max_token_size=22192,
             llm_model_kwargs={
                 "host": self.config.llm_host,
-                "options": {"num_ctx": 32768, "num_threads": 11},  # Increased context window
+                "options": {"num_ctx": 20768},  # Increased context window
                 "timeout": self.config.timeout,
             },
             embedding_func=EmbeddingFunc(
                 embedding_dim=self.config.embedding_dim,
-                max_token_size=self.config.max_embed_tokens,
+                max_token_size=8192, #self.config.max_embed_tokens,
                 func=lambda texts: self._robust_ollama_embed(texts),
             ),
             vector_storage="FaissVectorDBStorage",
@@ -130,9 +166,24 @@ class DocumentKnowledgeGraph:
             },
         )
 
+        self.logger.debug("Step: Initializing LightRAG storages")
         await self.rag.initialize_storages()
         if initialize_pipeline_status:
-            await initialize_pipeline_status()
+            self.logger.debug("Step: Initializing pipeline status")
+            # Wrap the call to also log the direct print output
+            import sys
+            from io import StringIO
+            _stderr = sys.stderr
+            try:
+                sys.stderr = StringIO()
+                await initialize_pipeline_status()
+                sys.stderr.seek(0)
+                msg = sys.stderr.read()
+                if msg:
+                    for line in msg.strip().splitlines():
+                        self.logger.info(line)
+            finally:
+                sys.stderr = _stderr
 
         self.is_initialized = True
         self.logger.info(f"✅ Document knowledge graph {self.document_id[:8]} initialized successfully")
@@ -153,6 +204,7 @@ class DocumentKnowledgeGraph:
             self.logger.info(f"Adding document content to KG {self.document_id[:8]} (size: {len(content):,} chars)...")
             
             if self.rag:
+                self.logger.debug(f"Step: Inserting content into LightRAG (length: {len(content):,} chars)")
                 await self.rag.ainsert(content, file_paths=file_paths)
                 self.logger.info(f"✅ Successfully added content to document KG {self.document_id[:8]}")
             else:
@@ -185,6 +237,7 @@ class DocumentKnowledgeGraph:
             self.logger.debug(f"Question: {question}")
 
             if self.rag:
+                self.logger.debug(f"Step: Building QueryParam for mode '{mode}'")
                 # Create QueryParam with explicit type handling to avoid type checker issues
                 query_param = None
                 if mode == "local":
@@ -199,8 +252,9 @@ class DocumentKnowledgeGraph:
                     query_param = QueryParam(mode="bypass", stream=stream, **kwargs)
                 else:  # default to hybrid
                     query_param = QueryParam(mode="hybrid", stream=stream, **kwargs)
-                
+                self.logger.debug(f"Step: Executing aquery on LightRAG")
                 resp = await self.rag.aquery(question, param=query_param)
+                self.logger.debug(f"Step: Query completed, response length: {len(str(resp))}")
                 return str(resp)
             else:
                 self.logger.error("RAG system not initialized")

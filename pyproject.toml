@@ -5,8 +5,6 @@ description = "Advanced document/knowledge ingestion system with LightRAG and mi
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    # Core dependencies
-    "lightrag-hku>=0.0.2.8",
     # PDF processing (following user's mineru methodology)
     "mineru>=0.2.2", # Primary PDF processor like in lightrag_ex.py
     "pymupdf>=1.23.0", # Fallback PDF processor
@@ -37,6 +35,9 @@ dependencies = [
     # Environment management
     "python-dotenv>=1.0.0",
     "ollama>=0.5.3",
+    "uvloop>=0.21.0",
+    "lightrag-hku>=1.4.6",
+    "raganything[all]>=1.2.6",
 ]
 
 [project.optional-dependencies]

@@ -250,6 +250,9 @@ class LibraryManager:
         # Load existing state
         self._load_library_state()
         
+        # Auto-populate missing metadata on startup
+        self._auto_populate_metadata()
+        
         self.logger.info(f"📚 Library initialized with {len(self.documents)} documents and {len(self.mindmaps)} mindmaps")
     
     def _load_library_state(self):
@@ -363,6 +366,97 @@ class LibraryManager:
         with open(self.index_file, 'w') as f:
             json.dump(index, f, indent=2)
     
+    def _auto_populate_metadata(self):
+        """Automatically populate missing metadata on library startup"""
+        self.logger.info("🔍 Auto-populating missing metadata...")
+        
+        # Process documents that need metadata filling
+        updated_count = 0
+        
+        for doc_id, document in self.documents.items():
+            needs_update = False
+            
+            # Fill in missing description (if content is available)
+            if not document.description and document.status == DocumentStatus.PROCESSED:
+                # In a real implementation, this would call an AI service or content parser
+                # For demonstration purposes, we'll use a placeholder
+                # This would be replaced with actual code to extract content and generate description
+                document.description = self._generate_description_from_content(document)
+                needs_update = True
+            
+            # Fill in missing tags
+            if not document.tags and document.status == DocumentStatus.PROCESSED:
+                # Generate some intelligent tags based on filename, file type, etc.
+                generated_tags = self._generate_tags_from_document(document)
+                if generated_tags:
+                    document.tags.update(generated_tags)
+                    needs_update = True
+            
+            # Save update if needed
+            if needs_update:
+                self.logger.info(f"🔄 Updated missing metadata for document: {document.filename}")
+                updated_count += 1
+        
+        if updated_count > 0:
+            self._update_stats()
+            self._save_library_state()
+            self.logger.info(f"✅ Auto-populated metadata for {updated_count} documents")
+    
+    def _generate_description_from_content(self, document: DocumentRecord) -> str:
+        """Generate placeholder description based on document content or metadata"""
+        # This would be replaced with actual code that reads the document
+        # and generates a meaningful description using AI services like OpenAI
+        
+        if document.file_type == DocumentType.DIRECTORY:
+            return f"Directory containing {document.file_count or 0} files"
+        
+        if document.file_type == DocumentType.PDF:
+            return "PDF document containing textual content and possibly images"
+        
+        if document.file_type in [DocumentType.TEXT, DocumentType.MARKDOWN]:
+            return "Text document with written content"
+        
+        if document.file_type == DocumentType.WORD:
+            return "Word processing document"
+        
+        if document.file_type == DocumentType.POWERPOINT:
+            return "Presentation document containing slides"
+        
+        # Default fallback
+        return f"Document: {document.filename}"
+    
+    def _generate_tags_from_document(self, document: DocumentRecord) -> Set[str]:
+        """Generate intelligent tags based on document properties"""
+        tags = set()
+        
+        # Add file type tag
+        tags.add(f"type:{document.file_type.value}")
+        
+        # Add based on content structure
+        if document.file_type == DocumentType.DIRECTORY:
+            tags.add("directory")
+            if document.file_count:
+                tags.add(f"files:{document.file_count}")
+        
+        # Add tags based on filename elements (simple approach)  
+        filename_parts = document.filename.lower().split('.')
+        if len(filename_parts) > 1:
+            basename = filename_parts[0]
+            # Split by common separators
+            tag_words = set()
+            for part in basename.split('_'):
+                tag_words.update(part.split('-'))
+            
+            # Add each word as a tag (but avoid too generic ones)
+            for word in tag_words:
+                if len(word) > 2:  # Skip very short words
+                    tags.add(word)
+        
+        # Add document status
+        tags.add(f"status:{document.status.value}")
+        
+        return tags
+    
     def add_document(self, filepath: str, filename: Optional[str] = None) -> str:
         """Add a new document to the library"""
         file_path = Path(filepath)
@@ -434,6 +528,25 @@ class LibraryManager:
         if status == DocumentStatus.FAILED:
             document.error_message = error_message
             document.retry_count += 1
+        
+        # Check if we need to populate metadata after processing
+        if status == DocumentStatus.PROCESSED:
+            needs_update = False
+            
+            # Populate description if needed
+            if not document.description:
+                document.description = self._generate_description_from_content(document)
+                needs_update = True
+                
+            # Populate tags if needed
+            if not document.tags:
+                generated_tags = self._generate_tags_from_document(document)
+                if generated_tags:
+                    document.tags.update(generated_tags)
+                    needs_update = True
+                    
+            if needs_update:
+                self.logger.info(f"🔄 Automatically populated metadata for processed document: {document.filename}")
         
         self._update_stats()
         self._save_library_state()

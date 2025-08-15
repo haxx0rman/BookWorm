@@ -31,7 +31,7 @@ SUPPORTED_EXTENSIONS = [".txt", ".md", ".docx", ".pptx"]
 LLM_MODEL = os.getenv("LLM_MODEL", "qwen3-coder:30b")
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "bge-m3:latest")
 EMBEDDING_DIM = int(os.getenv("EMBEDDING_DIM", "1024"))
-MAX_TOKEN_SIZE = int(os.getenv("MAX_EMBED_TOKENS", "40000"))
+MAX_TOKEN_SIZE = int(os.getenv("MAX_EMBED_TOKENS", "8192"))
 
 # Host configuration
 LLM_HOST = os.getenv("LLM_BINDING_HOST", "http://100.95.157.120:11434")
