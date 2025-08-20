@@ -20,9 +20,13 @@ from .knowledge import DocumentKnowledgeGraph, KnowledgeGraph
 
 from .library import LibraryManager, DocumentStatus
 from .utils import BookWormConfig, load_config, setup_logging
+from bookworm.pipeline import BookWormPipeline
 
 # Maintain backward compatibility - these are the main classes users need
 __all__ = [
+    # main pipeline
+    'BookWormPipeline',
+
     # Core models
     'ProcessedDocument',
     'MindmapResult', 
