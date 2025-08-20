@@ -12,7 +12,7 @@ import sys
 # Add the project root to Python path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from bookworm.pipeline import BookWormPipeline
+from bookworm import BookWormPipeline
 from bookworm.utils import load_config
 
 async def main():

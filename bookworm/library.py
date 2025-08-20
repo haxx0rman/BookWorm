@@ -39,7 +39,7 @@ class DocumentRecord:
     
     # Processing results
     processed_file_path: Optional[str] = None
-    knowledge_graph_id: Optional[str] = None
+    knowledge_graph_path: Optional[str] = None
     mindmap_id: Optional[str] = None
     
     # Metadata
@@ -70,7 +70,7 @@ class DocumentRecord:
             'updated_at': self.updated_at.isoformat(),
             'processed_at': self.processed_at.isoformat() if self.processed_at else None,
             'processed_file_path': self.processed_file_path,
-            'knowledge_graph_id': self.knowledge_graph_id,
+            'knowledge_graph_path': self.knowledge_graph_path,
             'mindmap_id': self.mindmap_id,
             'title': self.title,
             'author': self.author,
@@ -97,7 +97,7 @@ class DocumentRecord:
             updated_at=datetime.fromisoformat(data['updated_at']),
             processed_at=datetime.fromisoformat(data['processed_at']) if data.get('processed_at') else None,
             processed_file_path=data.get('processed_file_path'),
-            knowledge_graph_id=data.get('knowledge_graph_id'),
+            knowledge_graph_path=data.get('knowledge_graph_path'),
             mindmap_id=data.get('mindmap_id'),
             title=data.get('title'),
             author=data.get('author'),
@@ -125,7 +125,6 @@ class MindmapRecord:
     updated_at: datetime
     
     # Generation metadata
-    document_type: str
     token_usage: int
     generator_version: str
     
@@ -144,7 +143,6 @@ class MindmapRecord:
             'markdown_file': self.markdown_file,
             'created_at': self.created_at.isoformat(),
             'updated_at': self.updated_at.isoformat(),
-            'document_type': self.document_type,
             'token_usage': self.token_usage,
             'generator_version': self.generator_version,
             'topic_count': self.topic_count,
@@ -163,7 +161,6 @@ class MindmapRecord:
             markdown_file=data['markdown_file'],
             created_at=datetime.fromisoformat(data['created_at']),
             updated_at=datetime.fromisoformat(data['updated_at']),
-            document_type=data['document_type'],
             token_usage=data['token_usage'],
             generator_version=data['generator_version'],
             topic_count=data['topic_count'],
@@ -473,7 +470,7 @@ class LibraryManager:
     
     def update_document_status(self, doc_id: str, status: DocumentStatus, 
                              processed_file_path: Optional[str] = None, 
-                             knowledge_graph_id: Optional[str] = None,
+                             knowledge_graph_path: Optional[str] = None,
                              error_message: Optional[str] = None):
         """Update document processing status"""
         try:
@@ -488,8 +485,8 @@ class LibraryManager:
                 document.processed_at = datetime.now()
                 if processed_file_path:
                     document.processed_file_path = processed_file_path
-                if knowledge_graph_id:
-                    document.knowledge_graph_id = knowledge_graph_id
+                if knowledge_graph_path:
+                    document.knowledge_graph_path = knowledge_graph_path
             
             if status == DocumentStatus.FAILED:
                 document.error_message = error_message
@@ -547,7 +544,7 @@ class LibraryManager:
             self.logger.error(f"Failed updating document metadata: {e}")
             raise
     
-    def add_mindmap(self, document_id: str, mindmap_files: Dict[str, str], 
+    def add_mindmap(self, document_id: str, mindmap_result, 
                    metadata: Dict[str, Any]) -> str:
         """Add a mindmap record to the library"""
         try:
@@ -555,19 +552,18 @@ class LibraryManager:
                 raise ValueError(f"Document not found: {document_id}")
             
             # Generate mindmap ID
-            mindmap_id = str(uuid.uuid4())
+            mindmap_id = document_id
             
             # Create mindmap record
             mindmap = MindmapRecord(
                 id=mindmap_id,
                 document_id=document_id,
-                filename=f"mindmap_{self.documents[document_id].filename}",
-                mermaid_file=mindmap_files.get('mermaid', ''),
-                markdown_file=mindmap_files.get('markdown', ''),
+                filename = mindmap_result.document_filename,
+                mermaid_file=mindmap_result.mermaid,
+                markdown_file=mindmap_result.markdown,
                 created_at=datetime.now(),
                 updated_at=datetime.now(),
-                document_type=metadata.get('document_type', 'unknown'),
-                token_usage=metadata.get('token_usage', 0),
+                token_usage=mindmap_result.token_usage.total_cost,
                 generator_version=metadata.get('generator_version', '1.0'),
                 topic_count=metadata.get('topic_count', 0),
                 subtopic_count=metadata.get('subtopic_count', 0),
@@ -578,11 +574,12 @@ class LibraryManager:
             
             # Update document record
             self.documents[document_id].mindmap_id = mindmap_id
+            self.documents[document_id].updated_at = datetime.now()
             
             self._update_stats()
             self._save_library_state()
             
-            self.logger.info(f"🗺️ Added mindmap to library: {mindmap.filename} (ID: {mindmap_id})")
+            self.logger.info(f"🗺️ Added mindmap to library: {mindmap.id}")
             return mindmap_id
         except Exception as e:
             self.logger.error(f"Failed adding mindmap: {e}")

@@ -122,6 +122,7 @@ class BookWormPipeline:
             try:
                 mindmap_result = await self.mindmap_generator.generate_mindmap_from_file(file_path, output_dir = f"{self.config.working_dir}/mindmaps/{library_doc_id}", save_files=True)
                 print(f"    ✅ Mindmap generated (tokens: {mindmap_result.token_usage.total_cost:,})")
+                self.library_manager.add_mindmap(processed_doc.id, mindmap_result, {})
             except Exception as mindmap_error:
                 print(f"    ⚠️  Mindmap generation failed: {mindmap_error}")
 
@@ -196,6 +197,8 @@ class BookWormPipeline:
             try:
                 mindmap_result = await self.mindmap_generator.generate_mindmap_from_text(processed_doc.text_content, output_dir = f"{self.config.working_dir}/mindmaps/{library_doc_id}", save_files=True)
                 print(f"    ✅ Mindmap generated (tokens: {mindmap_result.token_usage.get('total_tokens', 0):,})")
+                
+                self.library_manager.add_mindmap(processed_doc.id, mindmap_result, {})
             except Exception as mindmap_error:
                 print(f"    ⚠️  Mindmap generation failed: {mindmap_error}")
 
