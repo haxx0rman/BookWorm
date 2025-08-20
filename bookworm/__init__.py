@@ -17,8 +17,8 @@ __description__ = "Advanced document/knowledge ingestion system with LightRAG an
 from .models import ProcessedDocument, MindmapResult
 from .processors import DocumentProcessor, DocumentDescriptionGenerator
 from .knowledge import DocumentKnowledgeGraph, KnowledgeGraph
-from .generators import MindmapGenerator
-from .library import LibraryManager, DocumentStatus, DocumentType
+
+from .library import LibraryManager, DocumentStatus
 from .utils import BookWormConfig, load_config, setup_logging
 
 # Maintain backward compatibility - these are the main classes users need
@@ -34,17 +34,15 @@ __all__ = [
     # Knowledge graph components
     'DocumentKnowledgeGraph',
     'KnowledgeGraph',
-    
-    # Generation components
-    'MindmapGenerator',
+
     
     # Library management
     'LibraryManager',
     'DocumentStatus',
-    'DocumentType',
     
     # Configuration
     'BookWormConfig',
     'load_config',
-    'setup_logging'
+    'setup_logging',
+    'utils'
 ]

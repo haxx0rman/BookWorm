@@ -10,7 +10,6 @@ try:
 except ImportError:
     AsyncOpenAI = None
 
-from ..models import ProcessedDocument
 from ..utils import BookWormConfig
 
 
@@ -33,25 +32,14 @@ class DocumentDescriptionGenerator:
         except ImportError:
             self.logger.warning("OpenAI client not available for Ollama integration")
         
-    async def generate_description(self, document: ProcessedDocument) -> Optional[str]:
+    async def generate_description(self, markdown_mindmap) -> Optional[str]:
         """Generate an AI description for a document"""
         try:
             # Prepare the text for description generation
-            text_content = document.text_content
-            
-            # Truncate text if too long (keep first 2000 characters for context)
-            if len(text_content) > 2000:
-                text_content = text_content[:2000] + "..."
-            
-            # Determine document type for better prompting
-            doc_type = "directory collection" if document.metadata.get("is_directory", False) else "document"
-            file_info = ""
-            if document.metadata.get("is_directory", False):
-                file_count = document.metadata.get("file_count", 0)
-                file_info = f" containing {file_count} files"
+            text_content = markdown_mindmap
             
             # Create prompt for description generation
-            prompt = f"""Analyze the following {doc_type}{file_info} and provide a concise, informative description (2-3 sentences) that captures:
+            prompt = f"""Analyze the following mindmap built from a document and provide a concise, informative description (2-3 sentences) that captures:
 
 1. The main topic or subject matter
 2. The type of content (academic, technical, business, etc.)
@@ -68,7 +56,7 @@ Provide only the description, no additional formatting or labels."""
                     response = await self.ollama_client.chat.completions.create(
                         model=self.config.llm_model,
                         messages=[{"role": "user", "content": prompt}],
-                        max_tokens=150,
+                        max_tokens=50000,
                         temperature=0.3
                     )
                     
@@ -81,35 +69,29 @@ Provide only the description, no additional formatting or labels."""
                         if description.lower().startswith("description:"):
                             description = description[12:].strip()
                         
-                        self.logger.info(f"📝 Generated description for document {document.id[:8]}: {description[:50]}...")
+                        self.logger.info(f"📝 Generated description: {description[:100]}...")
                         return description
                     else:
-                        self.logger.warning(f"⚠️ Empty description generated for document {document.id}")
-                        return self.generate_fallback_description(document)
+                        msg = "⚠️ Empty description generated"
+                        self.logger.warning(msg)
+                        return msg
+                        
+    
                 else:
-                    self.logger.warning("⚠️ Ollama client not available, using fallback description")
-                    return self.generate_fallback_description(document)
+                    msg = "⚠️ Ollama client not available, using fallback description"
+                    self.logger.warning(msg)
+                    return msg
+
                     
             except Exception as e:
-                self.logger.error(f"❌ Error calling Ollama for description generation: {e}")
-                return self.generate_fallback_description(document)
+                msg = f"❌ Error calling Ollama for description generation: {e}"
+                self.logger.error(msg)
+                return msg
                 
         except Exception as e:
-            self.logger.error(f"❌ Error generating description for document {document.id}: {e}")
-            return self.generate_fallback_description(document)
+            msg = f"❌ Error generating description for document: {e}"
+            self.logger.error(msg)
+            return f"❌ Error generating description: {e}"
+
     
-    def generate_fallback_description(self, document: ProcessedDocument) -> str:
-        """Generate a simple fallback description based on metadata"""
-        try:
-            doc_type = "Directory collection" if document.metadata.get("is_directory", False) else "Document"
-            
-            if document.metadata.get("is_directory", False):
-                file_count = document.metadata.get("file_count", 0)
-                return f"{doc_type} containing {file_count} files with {len(document.text_content):,} characters of combined content."
-            else:
-                word_count = len(document.text_content.split()) if document.text_content else 0
-                return f"{doc_type} with approximately {word_count:,} words covering various topics."
-                
-        except Exception as e:
-            self.logger.error(f"❌ Error generating fallback description: {e}")
-            return "Document processed successfully."
+

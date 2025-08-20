@@ -2,6 +2,7 @@
 Library state management for BookWorm
 Tracks documents, mindmaps, and provides indexing functionality
 """
+
 import json
 import logging
 import uuid
@@ -23,24 +24,13 @@ class DocumentStatus(Enum):
     ARCHIVED = "archived"
 
 
-class DocumentType(Enum):
-    """Document types for categorization"""
-    PDF = "pdf"
-    TEXT = "text"
-    MARKDOWN = "markdown"
-    WORD = "word"
-    POWERPOINT = "powerpoint"
-    DIRECTORY = "directory"
-    UNKNOWN = "unknown"
-
-
 @dataclass
 class DocumentRecord:
     """Record of a document in the library"""
+    
     id: str
     filename: str
     filepath: str
-    file_type: DocumentType
     file_size: int
     status: DocumentStatus
     created_at: datetime
@@ -74,7 +64,6 @@ class DocumentRecord:
             'id': self.id,
             'filename': self.filename,
             'filepath': self.filepath,
-            'file_type': self.file_type.value,
             'file_size': self.file_size,
             'status': self.status.value,
             'created_at': self.created_at.isoformat(),
@@ -102,7 +91,6 @@ class DocumentRecord:
             id=data['id'],
             filename=data['filename'],
             filepath=data['filepath'],
-            file_type=DocumentType(data['file_type']),
             file_size=data['file_size'],
             status=DocumentStatus(data['status']),
             created_at=datetime.fromisoformat(data['created_at']),
@@ -127,11 +115,11 @@ class DocumentRecord:
 @dataclass
 class MindmapRecord:
     """Record of a mindmap in the library"""
+    
     id: str
     document_id: str
     filename: str
     mermaid_file: str
-    html_file: str
     markdown_file: str
     created_at: datetime
     updated_at: datetime
@@ -139,7 +127,6 @@ class MindmapRecord:
     # Generation metadata
     document_type: str
     token_usage: int
-    processing_time: float
     generator_version: str
     
     # Content metadata
@@ -154,13 +141,11 @@ class MindmapRecord:
             'document_id': self.document_id,
             'filename': self.filename,
             'mermaid_file': self.mermaid_file,
-            'html_file': self.html_file,
             'markdown_file': self.markdown_file,
             'created_at': self.created_at.isoformat(),
             'updated_at': self.updated_at.isoformat(),
             'document_type': self.document_type,
             'token_usage': self.token_usage,
-            'processing_time': self.processing_time,
             'generator_version': self.generator_version,
             'topic_count': self.topic_count,
             'subtopic_count': self.subtopic_count,
@@ -175,13 +160,11 @@ class MindmapRecord:
             document_id=data['document_id'],
             filename=data['filename'],
             mermaid_file=data['mermaid_file'],
-            html_file=data['html_file'],
             markdown_file=data['markdown_file'],
             created_at=datetime.fromisoformat(data['created_at']),
             updated_at=datetime.fromisoformat(data['updated_at']),
             document_type=data['document_type'],
             token_usage=data['token_usage'],
-            processing_time=data['processing_time'],
             generator_version=data['generator_version'],
             topic_count=data['topic_count'],
             subtopic_count=data['subtopic_count'],
@@ -192,6 +175,7 @@ class MindmapRecord:
 @dataclass
 class LibraryStats:
     """Library statistics"""
+    
     total_documents: int = 0
     processed_documents: int = 0
     pending_documents: int = 0
@@ -226,12 +210,106 @@ class LibraryStats:
         )
 
 
+class DocumentMetadataManager:
+    """Handles metadata generation and population for documents"""
+    
+    def __init__(self):
+        self.logger = logging.getLogger("bookworm.library.metadata")
+    
+    def _generate_description(self, document: DocumentRecord) -> str:
+        """Generate placeholder description based on document content or metadata"""
+        # In a real implementation, this would analyze document content
+        return f"Description for {document.filename}"
+    
+    def _generate_tags(self, document: DocumentRecord) -> Set[str]:
+        """Generate intelligent tags based on document properties"""
+        # In a real implementation, this would analyze document properties to generate tags
+        return {"tag1", "tag2"} if document.filename else set()
+    
+    def populate_missing_metadata(self, document: DocumentRecord) -> bool:
+        """Populate missing metadata fields for a document"""
+        needs_update = False
+        
+        # Fill in missing description (if content is available)
+        if not document.description and document.status == DocumentStatus.PROCESSED:
+            document.description = self._generate_description(document)
+            needs_update = True
+        
+        # Fill in missing tags
+        if not document.tags and document.status == DocumentStatus.PROCESSED:
+            generated_tags = self._generate_tags(document)
+            if generated_tags:
+                document.tags.update(generated_tags)
+                needs_update = True
+        
+        return needs_update
+
+
+class LibraryIndexManager:
+    """Handles indexing and search functionality for the library"""
+    
+    def __init__(self, library_dir: Path):
+        self.library_dir = library_dir
+        self.index_file = self.library_dir / "index.json"
+        
+    def _build_index(self, documents: Dict[str, DocumentRecord], 
+                    mindmaps: Dict[str, MindmapRecord]) -> Dict[str, Any]:
+        """Build search index for fast lookups"""
+        # Initialize index components with empty collections
+        index = {
+            'documents_by_filename': {},
+            'documents_by_type': {},
+            'documents_by_status': {status.value: [] for status in DocumentStatus},
+            'mindmaps_by_document': {},
+            'tags': {}
+        }
+        
+        # Index documents by filename and status
+        for doc_id, doc in documents.items():
+            index['documents_by_filename'][doc.filename] = doc_id
+            
+            # Add document to its status bucket
+            index['documents_by_status'][doc.status.value].append(doc_id)
+            
+        
+        
+        # Index mindmaps by document ID
+        for mindmap_id, mindmap in mindmaps.items():
+            index['mindmaps_by_document'][mindmap.document_id] = mindmap_id
+        
+        # Index by tags
+        all_tags = set()
+        for doc in documents.values():
+            all_tags.update(doc.tags)
+        
+        for tag in all_tags:
+            index['tags'][tag] = [
+                doc_id for doc_id, doc in documents.items() if tag in doc.tags
+            ]
+        
+        return index
+    
+    def save_index(self, documents: Dict[str, DocumentRecord], 
+                   mindmaps: Dict[str, MindmapRecord]) -> None:
+        """Save search index to file"""
+        try:
+            index = self._build_index(documents, mindmaps)
+            with open(self.index_file, 'w') as f:
+                json.dump(index, f, indent=2)
+        except Exception as e:
+            logging.getLogger("bookworm.library").error(f"Failed to save search index: {e}")
+
+
 class LibraryManager:
     """Manages the BookWorm library state and indexing"""
     
     def __init__(self, config: BookWormConfig):
         self.config = config
         self.logger = logging.getLogger("bookworm.library")
+        
+        # Initialize managers
+        self.metadata_manager = DocumentMetadataManager()
+        self.index_manager = LibraryIndexManager(Path(config.working_dir) / "library")
         
         # Library file paths
         self.library_dir = Path(config.working_dir) / "library"
@@ -240,7 +318,6 @@ class LibraryManager:
         self.documents_file = self.library_dir / "documents.json"
         self.mindmaps_file = self.library_dir / "mindmaps.json"
         self.stats_file = self.library_dir / "stats.json"
-        self.index_file = self.library_dir / "index.json"
         
         # In-memory state
         self.documents: Dict[str, DocumentRecord] = {}
@@ -316,7 +393,7 @@ class LibraryManager:
                 json.dump(self.stats.to_dict(), f, indent=2)
             
             # Save search index
-            self._save_search_index()
+            self.index_manager.save_index(self.documents, self.mindmaps)
             
         except Exception as e:
             self.logger.error(f"Failed to save library state: {e}")
@@ -331,41 +408,6 @@ class LibraryManager:
         self.stats.total_size_bytes = sum(d.file_size for d in self.documents.values())
         self.stats.last_updated = datetime.now()
     
-    def _save_search_index(self):
-        """Save search index for fast lookups"""
-        index = {
-            'documents_by_filename': {doc.filename: doc.id for doc in self.documents.values()},
-            'documents_by_type': {},
-            'documents_by_status': {},
-            'mindmaps_by_document': {mindmap.document_id: mindmap.id for mindmap in self.mindmaps.values()},
-            'tags': {}
-        }
-        
-        # Index by document type
-        for doc_type in DocumentType:
-            index['documents_by_type'][doc_type.value] = [
-                doc.id for doc in self.documents.values() if doc.file_type == doc_type
-            ]
-        
-        # Index by status
-        for status in DocumentStatus:
-            index['documents_by_status'][status.value] = [
-                doc.id for doc in self.documents.values() if doc.status == status
-            ]
-        
-        # Index by tags
-        all_tags = set()
-        for doc in self.documents.values():
-            all_tags.update(doc.tags)
-        
-        for tag in all_tags:
-            index['tags'][tag] = [
-                doc.id for doc in self.documents.values() if tag in doc.tags
-            ]
-        
-        with open(self.index_file, 'w') as f:
-            json.dump(index, f, indent=2)
-    
     def _auto_populate_metadata(self):
         """Automatically populate missing metadata on library startup"""
         self.logger.info("🔍 Auto-populating missing metadata...")
@@ -373,27 +415,8 @@ class LibraryManager:
         # Process documents that need metadata filling
         updated_count = 0
         
-        for doc_id, document in self.documents.items():
-            needs_update = False
-            
-            # Fill in missing description (if content is available)
-            if not document.description and document.status == DocumentStatus.PROCESSED:
-                # In a real implementation, this would call an AI service or content parser
-                # For demonstration purposes, we'll use a placeholder
-                # This would be replaced with actual code to extract content and generate description
-                document.description = self._generate_description_from_content(document)
-                needs_update = True
-            
-            # Fill in missing tags
-            if not document.tags and document.status == DocumentStatus.PROCESSED:
-                # Generate some intelligent tags based on filename, file type, etc.
-                generated_tags = self._generate_tags_from_document(document)
-                if generated_tags:
-                    document.tags.update(generated_tags)
-                    needs_update = True
-            
-            # Save update if needed
-            if needs_update:
+        for document in self.documents.values():
+            if self.metadata_manager.populate_missing_metadata(document):
                 self.logger.info(f"🔄 Updated missing metadata for document: {document.filename}")
                 updated_count += 1
         
@@ -401,61 +424,6 @@ class LibraryManager:
             self._update_stats()
             self._save_library_state()
             self.logger.info(f"✅ Auto-populated metadata for {updated_count} documents")
-    
-    def _generate_description_from_content(self, document: DocumentRecord) -> str:
-        """Generate placeholder description based on document content or metadata"""
-        # This would be replaced with actual code that reads the document
-        # and generates a meaningful description using AI services like OpenAI
-        
-        if document.file_type == DocumentType.DIRECTORY:
-            return f"Directory containing {document.file_count or 0} files"
-        
-        if document.file_type == DocumentType.PDF:
-            return "PDF document containing textual content and possibly images"
-        
-        if document.file_type in [DocumentType.TEXT, DocumentType.MARKDOWN]:
-            return "Text document with written content"
-        
-        if document.file_type == DocumentType.WORD:
-            return "Word processing document"
-        
-        if document.file_type == DocumentType.POWERPOINT:
-            return "Presentation document containing slides"
-        
-        # Default fallback
-        return f"Document: {document.filename}"
-    
-    def _generate_tags_from_document(self, document: DocumentRecord) -> Set[str]:
-        """Generate intelligent tags based on document properties"""
-        tags = set()
-        
-        # Add file type tag
-        tags.add(f"type:{document.file_type.value}")
-        
-        # Add based on content structure
-        if document.file_type == DocumentType.DIRECTORY:
-            tags.add("directory")
-            if document.file_count:
-                tags.add(f"files:{document.file_count}")
-        
-        # Add tags based on filename elements (simple approach)  
-        filename_parts = document.filename.lower().split('.')
-        if len(filename_parts) > 1:
-            basename = filename_parts[0]
-            # Split by common separators
-            tag_words = set()
-            for part in basename.split('_'):
-                tag_words.update(part.split('-'))
-            
-            # Add each word as a tag (but avoid too generic ones)
-            for word in tag_words:
-                if len(word) > 2:  # Skip very short words
-                    tags.add(word)
-        
-        # Add document status
-        tags.add(f"status:{document.status.value}")
-        
-        return tags
     
     def add_document(self, filepath: str, filename: Optional[str] = None) -> str:
         """Add a new document to the library"""
@@ -469,7 +437,6 @@ class LibraryManager:
         
         # Determine file type - handle directories
         if file_path.is_dir():
-            file_type = DocumentType.DIRECTORY
             file_size = sum(f.stat().st_size for f in file_path.rglob("*") if f.is_file())
             # Collect sub-files for directory processing
             sub_files = [
@@ -478,17 +445,15 @@ class LibraryManager:
             ]
             file_count = len(sub_files)
         else:
-            file_type = self._get_file_type(file_path.suffix.lower())
             file_size = file_path.stat().st_size
             sub_files = []
             file_count = None
         
-        # Create document record
+        # Create document record with more precise validation
         document = DocumentRecord(
             id=doc_id,
             filename=filename,
             filepath=str(file_path.absolute()),
-            file_type=file_type,
             file_size=file_size,
             status=DocumentStatus.PENDING,
             created_at=datetime.now(),
@@ -511,120 +476,117 @@ class LibraryManager:
                              knowledge_graph_id: Optional[str] = None,
                              error_message: Optional[str] = None):
         """Update document processing status"""
-        if doc_id not in self.documents:
-            raise ValueError(f"Document not found: {doc_id}")
-        
-        document = self.documents[doc_id]
-        document.status = status
-        document.updated_at = datetime.now()
-        
-        if status == DocumentStatus.PROCESSED:
-            document.processed_at = datetime.now()
-            if processed_file_path:
-                document.processed_file_path = processed_file_path
-            if knowledge_graph_id:
-                document.knowledge_graph_id = knowledge_graph_id
-        
-        if status == DocumentStatus.FAILED:
-            document.error_message = error_message
-            document.retry_count += 1
-        
-        # Check if we need to populate metadata after processing
-        if status == DocumentStatus.PROCESSED:
-            needs_update = False
+        try:
+            if doc_id not in self.documents:
+                raise ValueError(f"Document not found: {doc_id}")
             
-            # Populate description if needed
-            if not document.description:
-                document.description = self._generate_description_from_content(document)
-                needs_update = True
-                
-            # Populate tags if needed
-            if not document.tags:
-                generated_tags = self._generate_tags_from_document(document)
-                if generated_tags:
-                    document.tags.update(generated_tags)
-                    needs_update = True
-                    
-            if needs_update:
-                self.logger.info(f"🔄 Automatically populated metadata for processed document: {document.filename}")
-        
-        self._update_stats()
-        self._save_library_state()
-        
-        self.logger.info(f"📄 Updated document {doc_id} status to {status.value}")
+            document = self.documents[doc_id]
+            document.status = status
+            document.updated_at = datetime.now()
+            
+            if status == DocumentStatus.PROCESSED:
+                document.processed_at = datetime.now()
+                if processed_file_path:
+                    document.processed_file_path = processed_file_path
+                if knowledge_graph_id:
+                    document.knowledge_graph_id = knowledge_graph_id
+            
+            if status == DocumentStatus.FAILED:
+                document.error_message = error_message
+                document.retry_count += 1
+            
+            # Check if we need to populate metadata after processing
+            if status == DocumentStatus.PROCESSED:
+                needs_update = self.metadata_manager.populate_missing_metadata(document)
+                if needs_update:
+                    self.logger.info(f"🔄 Automatically populated metadata for processed document: {document.filename}")
+            
+            self._update_stats()
+            self._save_library_state()
+            
+            self.logger.info(f"📄 Updated document {doc_id} status to {status.value}")
+        except Exception as e:
+            self.logger.error(f"Failed updating document status: {e}")
+            raise
     
     def update_document_metadata(self, doc_id: str, metadata: Dict[str, Any]) -> None:
         """Update document metadata"""
-        if doc_id not in self.documents:
-            raise ValueError(f"Document not found: {doc_id}")
-        
-        document = self.documents[doc_id]
-        
-        # Update metadata fields that exist in DocumentRecord
-        updateable_fields = {
-            'knowledge_graph_path': 'knowledge_graph_id',  # Map path to id for storage
-            'title': 'title',
-            'author': 'author',
-            'description': 'description',  # Add description field
-            'word_count': 'word_count',
-            'processed_file_path': 'processed_file_path',
-            'knowledge_graph_id': 'knowledge_graph_id'
-        }
-        
-        for key, value in metadata.items():
-            if key in updateable_fields:
-                field_name = updateable_fields[key]
-                if hasattr(document, field_name):
-                    setattr(document, field_name, value)
-            elif key == 'tags' and isinstance(value, (list, set)):
-                # Handle tags specially
-                document.tags.update(value)
-        
-        document.updated_at = datetime.now()
-        
-        self._update_stats()
-        self._save_library_state()
-        
-        self.logger.info(f"📄 Updated document {doc_id} metadata")
+        try:
+            if doc_id not in self.documents:
+                raise ValueError(f"Document not found: {doc_id}")
+            
+            document = self.documents[doc_id]
+            
+            # Update metadata fields that exist in DocumentRecord
+            updateable_fields = {
+                'knowledge_graph_path': 'knowledge_graph_id',
+                'title': 'title',
+                'author': 'author',
+                'description': 'description',
+                'word_count': 'word_count',
+                'processed_file_path': 'processed_file_path',
+                'knowledge_graph_id': 'knowledge_graph_id'
+            }
+            
+            for key, value in metadata.items():
+                if key in updateable_fields:
+                    field_name = updateable_fields[key]
+                    if hasattr(document, field_name):
+                        setattr(document, field_name, value)
+                elif key == 'tags' and isinstance(value, (list, set)):
+                    # Handle tags specially
+                    document.tags.update(value)
+            
+            document.updated_at = datetime.now()
+            
+            self._update_stats()
+            self._save_library_state()
+            
+            self.logger.info(f"📄 Updated document {doc_id} metadata")
+        except Exception as e:
+            self.logger.error(f"Failed updating document metadata: {e}")
+            raise
     
     def add_mindmap(self, document_id: str, mindmap_files: Dict[str, str], 
                    metadata: Dict[str, Any]) -> str:
         """Add a mindmap record to the library"""
-        if document_id not in self.documents:
-            raise ValueError(f"Document not found: {document_id}")
-        
-        # Generate mindmap ID
-        mindmap_id = str(uuid.uuid4())
-        
-        # Create mindmap record
-        mindmap = MindmapRecord(
-            id=mindmap_id,
-            document_id=document_id,
-            filename=f"mindmap_{self.documents[document_id].filename}",
-            mermaid_file=mindmap_files.get('mermaid', ''),
-            html_file=mindmap_files.get('html', ''),
-            markdown_file=mindmap_files.get('markdown', ''),
-            created_at=datetime.now(),
-            updated_at=datetime.now(),
-            document_type=metadata.get('document_type', 'unknown'),
-            token_usage=metadata.get('token_usage', 0),
-            processing_time=metadata.get('processing_time', 0.0),
-            generator_version=metadata.get('generator_version', '1.0'),
-            topic_count=metadata.get('topic_count', 0),
-            subtopic_count=metadata.get('subtopic_count', 0),
-            detail_count=metadata.get('detail_count', 0)
-        )
-        
-        self.mindmaps[mindmap_id] = mindmap
-        
-        # Update document record
-        self.documents[document_id].mindmap_id = mindmap_id
-        
-        self._update_stats()
-        self._save_library_state()
-        
-        self.logger.info(f"🗺️ Added mindmap to library: {mindmap.filename} (ID: {mindmap_id})")
-        return mindmap_id
+        try:
+            if document_id not in self.documents:
+                raise ValueError(f"Document not found: {document_id}")
+            
+            # Generate mindmap ID
+            mindmap_id = str(uuid.uuid4())
+            
+            # Create mindmap record
+            mindmap = MindmapRecord(
+                id=mindmap_id,
+                document_id=document_id,
+                filename=f"mindmap_{self.documents[document_id].filename}",
+                mermaid_file=mindmap_files.get('mermaid', ''),
+                markdown_file=mindmap_files.get('markdown', ''),
+                created_at=datetime.now(),
+                updated_at=datetime.now(),
+                document_type=metadata.get('document_type', 'unknown'),
+                token_usage=metadata.get('token_usage', 0),
+                generator_version=metadata.get('generator_version', '1.0'),
+                topic_count=metadata.get('topic_count', 0),
+                subtopic_count=metadata.get('subtopic_count', 0),
+                detail_count=metadata.get('detail_count', 0)
+            )
+            
+            self.mindmaps[mindmap_id] = mindmap
+            
+            # Update document record
+            self.documents[document_id].mindmap_id = mindmap_id
+            
+            self._update_stats()
+            self._save_library_state()
+            
+            self.logger.info(f"🗺️ Added mindmap to library: {mindmap.filename} (ID: {mindmap_id})")
+            return mindmap_id
+        except Exception as e:
+            self.logger.error(f"Failed adding mindmap: {e}")
+            raise
     
     def get_document(self, doc_id: str) -> Optional[DocumentRecord]:
         """Get document by ID"""
@@ -642,23 +604,24 @@ class LibraryManager:
         return None
     
     def find_documents(self, filename: Optional[str] = None, status: Optional[DocumentStatus] = None, 
-                      file_type: Optional[DocumentType] = None, tags: Optional[List[str]] = None) -> List[DocumentRecord]:
+                      tags: Optional[List[str]] = None) -> List[DocumentRecord]:
         """Find documents by criteria"""
-        results = list(self.documents.values())
-        
-        if filename:
-            results = [doc for doc in results if filename.lower() in doc.filename.lower()]
-        
-        if status:
-            results = [doc for doc in results if doc.status == status]
-        
-        if file_type:
-            results = [doc for doc in results if doc.file_type == file_type]
-        
-        if tags:
-            results = [doc for doc in results if any(tag in doc.tags for tag in tags)]
-        
-        return results
+        try:
+            results = list(self.documents.values())
+            
+            if filename:
+                results = [doc for doc in results if filename.lower() in doc.filename.lower()]
+            
+            if status:
+                results = [doc for doc in results if doc.status == status]
+            
+            if tags:
+                results = [doc for doc in results if any(tag in doc.tags for tag in tags)]
+            
+            return results
+        except Exception as e:
+            self.logger.error(f"Error finding documents: {e}")
+            return []
     
     def get_library_stats(self) -> LibraryStats:
         """Get current library statistics"""
@@ -667,72 +630,65 @@ class LibraryManager:
     
     def scan_directories(self) -> List[str]:
         """Scan document directories for new files"""
-        new_documents = []
-        
-        # Get existing files from library
-        existing_paths = {doc.filepath for doc in self.documents.values()}
-        
-        # Scan document directory
-        doc_dir = Path(self.config.document_dir)
-        if doc_dir.exists():
-            for file_path in doc_dir.rglob('*'):
-                if file_path.is_file() and str(file_path.absolute()) not in existing_paths:
-                    # Check if it's a supported file type
-                    if self._is_supported_file(file_path):
-                        doc_id = self.add_document(str(file_path))
-                        new_documents.append(doc_id)
-        
-        if new_documents:
-            self.logger.info(f"📁 Discovered {len(new_documents)} new documents during directory scan")
-        
-        return new_documents
-    
-    def _get_file_type(self, extension: str) -> DocumentType:
-        """Determine file type from extension"""
-        type_map = {
-            '.pdf': DocumentType.PDF,
-            '.txt': DocumentType.TEXT,
-            '.md': DocumentType.MARKDOWN,
-            '.markdown': DocumentType.MARKDOWN,
-            '.docx': DocumentType.WORD,
-            '.doc': DocumentType.WORD,
-            '.pptx': DocumentType.POWERPOINT,
-            '.ppt': DocumentType.POWERPOINT,
-            'directory': DocumentType.DIRECTORY  # Special case for directories
-        }
-        return type_map.get(extension, DocumentType.UNKNOWN)
+        try:
+            new_documents = []
+            
+            # Get existing file paths from library
+            existing_paths = {doc.filepath for doc in self.documents.values()}
+            
+            # Scan document directory
+            doc_dir = Path(self.config.document_dir)
+            if doc_dir.exists():
+                for file_path in doc_dir.rglob('*'):
+                    if file_path.is_file() and str(file_path.absolute()) not in existing_paths:
+                        # Check if it's a supported file type
+                        if self._is_supported_file(file_path):
+                            doc_id = self.add_document(str(file_path))
+                            new_documents.append(doc_id)
+            
+            if new_documents:
+                self.logger.info(f"📁 Discovered {len(new_documents)} new documents during directory scan")
+            
+            return new_documents
+        except Exception as e:
+            self.logger.error(f"Error scanning directories: {e}")
+            return []
     
     def _is_supported_file(self, file_path: Path) -> bool:
         """Check if file type is supported"""
-        supported_extensions = {'.pdf', '.txt', '.md', '.markdown', '.docx', '.doc', '.html', '.htm'}
-        return file_path.suffix.lower() in supported_extensions
+        try:
+            supported_extensions = {'.pdf', '.txt', '.md', '.markdown', '.docx', '.doc', '.html', '.htm'}
+            return file_path.suffix.lower() in supported_extensions
+        except Exception as e:
+            self.logger.error(f"Error checking supported file: {e}")
+            return False
     
     def export_library_report(self, output_file: Optional[str] = None) -> str:
         """Export a comprehensive library report"""
-        if not output_file:
-            output_file = str(self.library_dir / f"library_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
-        
-        report = {
-            'generated_at': datetime.now().isoformat(),
-            'stats': self.stats.to_dict(),
-            'documents': [doc.to_dict() for doc in self.documents.values()],
-            'mindmaps': [mindmap.to_dict() for mindmap in self.mindmaps.values()],
-            'summary': {
-                'total_documents': len(self.documents),
-                'by_status': {
-                    status.value: len([d for d in self.documents.values() if d.status == status])
-                    for status in DocumentStatus
-                },
-                'by_type': {
-                    file_type.value: len([d for d in self.documents.values() if d.file_type == file_type])
-                    for file_type in DocumentType
-                },
-                'mindmap_coverage': f"{(len(self.mindmaps) / max(1, len(self.documents))) * 100:.1f}%"
+        try:
+            if not output_file:
+                output_file = str(self.library_dir / f"library_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
+            
+            report = {
+                'generated_at': datetime.now().isoformat(),
+                'stats': self.stats.to_dict(),
+                'documents': [doc.to_dict() for doc in self.documents.values()],
+                'mindmaps': [mindmap.to_dict() for mindmap in self.mindmaps.values()],
+                'summary': {
+                    'total_documents': len(self.documents),
+                    'by_status': {
+                        status.value: len([d for d in self.documents.values() if d.status == status])
+                        for status in DocumentStatus
+                    },
+                    'mindmap_coverage': f"{(len(self.mindmaps) / max(1, len(self.documents))) * 100:.1f}%"
+                }
             }
-        }
-        
-        with open(output_file, 'w') as f:
-            json.dump(report, f, indent=2)
-        
-        self.logger.info(f"📊 Exported library report to: {output_file}")
-        return str(output_file)
+            
+            with open(output_file, 'w') as f:
+                json.dump(report, f, indent=2)
+            
+            self.logger.info(f"📊 Exported library report to: {output_file}")
+            return str(output_file)
+        except Exception as e:
+            self.logger.error(f"Error exporting library report: {e}")
+            raise

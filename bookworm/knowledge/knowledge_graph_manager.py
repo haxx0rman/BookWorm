@@ -45,7 +45,7 @@ class KnowledgeGraph:
             pass
         
         self.logger.info("Initializing KnowledgeGraph manager...")
-        graphs_dir = Path("./bookworm_workspace/knowledge_graphs")
+        graphs_dir = Path("./workspace/knowledge_graphs")
         graphs_dir.mkdir(parents=True, exist_ok=True)
         self.logger.info("KnowledgeGraph manager ready")
     
@@ -156,7 +156,7 @@ class KnowledgeGraph:
             return self.document_graphs[document_id]
         
         # Try to load from disk if not in memory
-        doc_working_dir = Path("./bookworm_workspace/knowledge_graphs") / document_id
+        doc_working_dir = Path("./workspace/knowledge_graphs") / document_id
         if doc_working_dir.exists():
             self.logger.info(f"Loading existing knowledge graph for document {document_id[:8]}...")
             doc_kg = DocumentKnowledgeGraph(self.config, document_id, self.library_manager)
@@ -173,7 +173,7 @@ class KnowledgeGraph:
         """
         # Prefer loaded graphs; if none loaded, attempt to load all existing from disk
         if not self.document_graphs:
-            graphs_dir = Path("./bookworm_workspace/knowledge_graphs")
+            graphs_dir = Path("./workspace/knowledge_graphs")
             if graphs_dir.exists():
                 for doc_dir in graphs_dir.iterdir():
                     if doc_dir.is_dir():
@@ -214,7 +214,7 @@ class KnowledgeGraph:
         results = {}
         
         # Load all existing graphs
-        graphs_dir = Path("./bookworm_workspace/knowledge_graphs")
+        graphs_dir = Path("./workspace/knowledge_graphs")
         if graphs_dir.exists():
             for doc_dir in graphs_dir.iterdir():
                 if doc_dir.is_dir():
@@ -233,7 +233,7 @@ class KnowledgeGraph:
     def list_document_graphs(self) -> List[str]:
         """List all available document knowledge graphs"""
         graphs = []
-        graphs_dir = Path("./bookworm_workspace/knowledge_graphs")
+        graphs_dir = Path("./workspace/knowledge_graphs")
         if graphs_dir.exists():
             for doc_dir in graphs_dir.iterdir():
                 if doc_dir.is_dir():

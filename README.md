@@ -129,7 +129,7 @@ API_PROVIDER="OPENAI"  # Options: OPENAI, CLAUDE, DEEPSEEK, GEMINI
 # LightRAG Configuration
 LLM_MODEL="gpt-4o-mini"
 EMBEDDING_MODEL="text-embedding-3-small"
-WORKING_DIR="./bookworm_workspace"
+WORKING_DIR="./workspace"
 
 # Processing Settings
 MAX_CONCURRENT_PROCESSES="4"
@@ -142,7 +142,7 @@ PDF_PROCESSOR="pymupdf"  # Options: pymupdf, pdfplumber
 BookWorm creates the following directory structure:
 
 ```
-bookworm_workspace/
+workspace/
 ├── docs/           # Input documents
 ├── processed/      # Processed text files
 ├── output/         # Generated mindmaps

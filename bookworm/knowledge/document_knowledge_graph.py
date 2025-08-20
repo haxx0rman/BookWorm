@@ -41,7 +41,7 @@ class DocumentKnowledgeGraph:
         self.is_initialized = False
         
         # Create document-specific working directory
-        self.doc_working_dir = Path("./bookworm_workspace/knowledge_graphs") / document_id
+        self.doc_working_dir = Path("./workspace/knowledge_graphs") / document_id
         self.doc_working_dir.mkdir(parents=True, exist_ok=True)
         
         if not LightRAG:

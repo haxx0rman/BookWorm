@@ -27,7 +27,7 @@ class BookWormConfig:
     api_provider: str = "OPENAI"
     
     # LightRAG Settings (following user's lightrag_ex.py and lightrag_manager.py exactly)
-    llm_model: str = "qwen2.5-coder:32b"  # User's model from lightrag_manager.py
+    llm_model: str = "qwen3-coder:30b"  # User's model from lightrag_manager.py
     embedding_model: str = "bge-m3:latest"  # User's embedding model
     llm_host: str = "http://100.95.157.120:11434"  # User's specific host
     embedding_host: str = "http://100.95.157.120:11434"  # User's specific host
@@ -41,10 +41,10 @@ class BookWormConfig:
     max_tokens: int = 2000
     
     # Directory Settings (following user's lightrag_ex.py structure)
-    working_dir: str = "./bookworm_workspace"  # BookWorm working directory
-    document_dir: str = "./bookworm_workspace/docs"
-    processed_dir: str = "./bookworm_workspace/processed_docs"  # Align with examples
-    output_dir: str = "./bookworm_workspace/output"
+    working_dir: str = "./workspace"  # BookWorm working directory
+    document_dir: str = "./workspace/docs"
+    processed_dir: str = "./workspace/processed_docs"  # Align with examples
+    output_dir: str = "./workspace/output"
     
     # PDF Processing (following user's preference for mineru)
     pdf_processor: str = "mineru"  # Primary: mineru, fallback: pymupdf, pdfplumber
@@ -99,7 +99,7 @@ def load_config(env_file: Optional[str] = None) -> BookWormConfig:
     config.max_tokens = int(os.getenv("MAX_TOKENS", "20000"))
     
     # Load directory settings
-    config.working_dir = os.getenv("WORKING_DIR", "./bookworm_workspace")
+    config.working_dir = os.getenv("WORKING_DIR", "./workspace")
     config.document_dir = os.getenv("DOCUMENT_DIR", f"{config.working_dir}/docs")
     config.processed_dir = os.getenv("PROCESSED_DIR", f"{config.working_dir}/processed_docs")
     config.output_dir = os.getenv("OUTPUT_DIR", f"{config.working_dir}/output")

@@ -38,6 +38,8 @@ dependencies = [
     "uvloop>=0.21.0",
     "lightrag-hku>=1.4.6",
     "raganything[all]>=1.2.6",
+    "update>=0.0.1",
+    "chartographer",
 ]
 
 [project.optional-dependencies]
@@ -62,3 +64,6 @@ target-version = ['py311']
 
 [tool.isort]
 profile = "black"
+
+[tool.uv.sources]
+chartographer = { git = "https://github.com/haxx0rman/Chartographer" }

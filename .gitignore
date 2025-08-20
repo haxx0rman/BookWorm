@@ -10,7 +10,7 @@ wheels/
 .venv
 
 # BookWorm workspace files
-bookworm_workspace/
+workspace/
 lightrag_workspace/
 
 # Log files
@@ -42,3 +42,6 @@ test_debug.py
 debug_*
 logs/bookworm.log
 /raganything_workspace
+/workspace copy
+/bookworm_workspace
+/logs
