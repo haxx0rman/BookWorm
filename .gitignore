@@ -45,3 +45,4 @@ logs/bookworm.log
 /workspace copy
 /bookworm_workspace
 /logs
+uv.lock

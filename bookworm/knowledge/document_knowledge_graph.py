@@ -149,7 +149,7 @@ class DocumentKnowledgeGraph:
             working_dir=str(self.doc_working_dir),
             llm_model_func=self._robust_ollama_complete,
             llm_model_name=self.config.llm_model,
-            llm_model_max_token_size=22192,
+            # llm_model_max_token_size=22192,
             llm_model_kwargs={
                 "host": self.config.llm_host,
                 "options": {"num_ctx": 20768},  # Increased context window
