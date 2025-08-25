@@ -253,7 +253,7 @@ class DocumentKnowledgeGraph:
                 else:  # default to hybrid
                     query_param = QueryParam(mode="hybrid", stream=stream, **kwargs)
                 self.logger.debug(f"Step: Executing aquery on LightRAG")
-                resp = await self.rag.aquery(question, param=query_param)
+                resp = self.rag.query(question, param=query_param)
                 self.logger.debug(f"Step: Query completed, response length: {len(str(resp))}")
                 return str(resp)
             else:
